@@ -1,0 +1,44 @@
+"""
+A toy model for hydro simulations, used to test things
+before trying out Arepo.
+Author: Maggie Celeste
+Date: 07/11/2019
+"""
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+gamma = 1.4
+
+#W = [rho, v, p] primitive vector of the cell
+#q = [rho, rho*v, E] is the conserved state vector
+#F = [rho*v, rho*v**2 + p, (E+p)*v] is the Flux
+#rho is fluid density, v velocity, E = u + 1/2rho v**2 is total energy density
+
+#Takes in primitive vector, returns conserved state vector
+def prim2vec(W):
+    q = np.array([0,0,0])
+    q[0] = W[0]
+    q[1] = W[1]*W[0]
+    #assuming an ideal gas for EOS:
+    q[2] = W[2]/(gamma-1) + (1/2)*W[0]*W[1]**2
+    
+    return(q)
+
+def 
+def Riemann(gamma, WL, WR):
+    #sound speed on L and R:
+    csL = np.sqrt(gamma*WL[1]/WL[0])
+    csR = np.sqrt(gamma*WR[1]/WR[0])
+    
+    #wave speeds, v +- cs, according to Davis (1988)
+    SL = WL[2] - csL
+    SR = WR[2] + csR
+    
+    UL = prim2vec(WL)
+    UR = prim2vec(WR)
+    
+    if (SL > 0 or SL == 0):
+        Fhll = 
+    
+    
