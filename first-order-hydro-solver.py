@@ -15,7 +15,7 @@ boundary = "flow"
 #Set up empty vectors
 #100 grid points w/ ghost cell either side
 #thus 103 cell walls
-nx = 5000
+nx = 1000
 x = np.full(nx+2, np.nan)
 xi = np.full(nx+3, np.nan)
 
@@ -28,7 +28,7 @@ fhll = np.full((nx+1, 3), np.nan)
 
 #now populate grid vectors
 #note cell walls indexed st wall i is left of cell i
-dx = 4.0/nx
+dx = 1.0/nx
 for i in range(0, nx+2):
     x[i] = (i-1.0)*dx
 
@@ -36,11 +36,14 @@ for i in range(0, nx+3):
     xi[i] = (i-1.0)*dx - 0.5*dx
 
 #set up initial conditions and advection velocity array 
+"""STRONG SHOCK TUBE"""
+#rhoL, PL, vL = 10.0, 100, 1e-16
+#rhoR, PR, vR = 2.0, 1, 1e-16
 """SOD SHOCK TUBE"""
-rhoL, PL, vL = 10.0, 100, 1e-16
-rhoR, PR, vR = 2.0, 1, 1e-16
+rhoL, PL, vL = 1.0, 1.0, 1e-16
+rhoR, PR, vR = 0.1, 0.125, 1e-16
 for i in range(0, nx+2):
-    if x[i] <= 2.0:
+    if x[i] <= 0.5:
         q[i,0] = rhoL
         q[i,1] = rhoL*vL
         q[i,2] = PL/(gamma-1) + 0.5*rhoL*vL**2
@@ -50,7 +53,7 @@ for i in range(0, nx+2):
         q[i,2] = PR/(gamma-1) + 0.5*rhoR*vR**2
 
 #simulation end time
-tend = 0.4 
+tend = 0.2
 
 #perform advection
 t = 0.0
@@ -114,7 +117,7 @@ while t < tend:
     t+=dt
 
 plt.plot(x, q[:,0])
-plt.savefig("strong_shock" + str(t) + ".pdf")
+plt.savefig("sod_shock_0p2s.pdf")
 plt.show()
 
 
