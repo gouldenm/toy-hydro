@@ -9,7 +9,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 gamma = 1.4
-CFL = 0.5
+CFL = 0.01
 boundary = "flow"
 g = 2 #number of ghost cells
 
@@ -115,42 +115,42 @@ def boundary(q,boundary):
 
 #PERFORM ADVECTION IN WHILE LOOP
 while t < tend:
-    q = boundary(q, "flow")
-    
-    #Integrate in time using Runge-Kutta method (3rd order)    
-    fhll, maxv = riemann_solver(q)
-    
-    #make sure timestep abides by CFL condition
-    try:
-        dt = CFL*dx/maxv
-    except:
-        dt = 1e-10
-        print("v=0 is max velocity")
-    
-    for i in range(1, nx+3):
-        L = - (fhll[i,:] - fhll[i-1,:])/dx
-        q1[i,:] = q[i,:] + dt*L
-    q1 = boundary(q1, "flow")
-    
-    fhll1, maxv = riemann_solver(q1)
-    for i in range(1, nx+3):
-        L1 = - (fhll1[i,:] - fhll1[i-1,:])/dx
-        q2[i,:] = 0.75*q[i,:] + 0.25*q1[i,:] + 0.25*dt*L1
-    q2 = boundary(q2, "flow")
-    
-    fhll2, maxv = riemann_solver(q2)
-    for i in range(1, nx+3):
-        L2 = (fhll2[i,:] - fhll2[i-1,:])/dx
-        qnew[i,:] = (1/3)*q[i,:] + (2/3)*q2[i,:] + (2/3)*dt*L2
-    
-    q = qnew
-    plt.plot(x, q[:,0])
-    #plt.savefig("shock" + str(t) + ".pdf")
-    #plt.close()
-    print(dt)
-    t+=dt
-    
-    print(t, q[:,0])
+	q = boundary(q, "flow")
+		
+	#Integrate in time using Runge-Kutta method (3rd order)    
+	fhll, maxv = riemann_solver(q)
+		
+	#make sure timestep abides by CFL condition
+	try:
+		dt = CFL*dx/maxv
+	except:
+		dt = 1e-10
+		print("v=0 is max velocity")
+	
+	print("First step of RK:")
+	for i in range(1, nx+3):
+		L = - (fhll[i,:] - fhll[i-1,:])/dx
+		q1[i,:] = q[i,:] + dt*L
+	q1 = boundary(q1, "flow")
+	
+	print("Second step of RK:")
+	fhll1, maxv = riemann_solver(q1)
+	for i in range(1, nx+3):
+		L1 = - (fhll1[i,:] - fhll1[i-1,:])/dx
+		q2[i,:] = 0.75*q[i,:] + 0.25*q1[i,:] + 0.25*dt*L1
+	q2 = boundary(q2, "flow")
+		
+	print("Third step of RK:")
+	fhll2, maxv = riemann_solver(q2)
+	for i in range(1, nx+3):
+		L2 = (fhll2[i,:] - fhll2[i-1,:])/dx
+		qnew[i,:] = (1/3)*q[i,:] + (2/3)*q2[i,:] + (2/3)*dt*L2
+	
+	q = qnew
+	plt.plot(x, q[:,0])
+	#plt.savefig("shock" + str(t) + ".pdf")
+	#plt.close()
+	t+=dt
 
 plt.plot(x, q[:,0])
 plt.savefig("strong_shock" + str(t) + ".pdf")
