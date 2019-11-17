@@ -6,13 +6,14 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 #Initialise vectors
-nx = 1000							#number of cells (nb total number = nx + 2 ghost cells)
-x = np.full(nx+2, np.nan)			#cell centers
-xi = np.full(nx+3, np.nan)			#cell interfaces (interface i is left of cell i)
-q = np.full((nx+2, 3), np.nan)		#state vector
-qnew = np.full((nx+2, 3), np.nan)	#new state vector after advection
-f = np.full((nx+2, 3), np.nan)		#flux of cell centers
-fhll = np.full((nx+1, 3), np.nan)	#HLL flux across interface
+nx = 1000							#number of cells (nb total number = nx + 4 ghost cells)
+x = np.full(nx+4, np.nan)			#cell centers
+xi = np.full(nx+5, np.nan)			#cell interfaces (interface i is left of cell i)
+q = np.full((nx+4, 3), np.nan)		#state vector
+qnew = np.full((nx+4, 3), np.nan)	#new state vector after advection
+qest = np.full((nx+4, 3), np.nan) 	#used to hold predictor vector for Heun's integration
+f = np.full((nx+4, 3), np.nan)		#flux of cell centers
+fhll = np.full((nx+3, 3), np.nan)	#HLL flux across interface
 
 #set up initial conditions
 CFL = 0.5							#CFL criterion determining how short timesteps should be
@@ -26,11 +27,11 @@ rhoL, PL, vL = 1.0, 1.0, 1e-16 		#left volume
 rhoR, PR, vR = 0.1, 0.125, 1e-16	#right volume
 
 #Populate vectors
-for i in range(0, nx+2):			#cell centers
+for i in range(0, nx+4):			#cell centers
     x[i] = (i-2.0)*dx
-for i in range(0, nx+3):			#cell interfaces
+for i in range(0, nx+5):			#cell interfaces
     xi[i] = (i-2.0)*dx - 0.5*dx
-for i in range(0, nx+2):			#state vectors
+for i in range(0, nx+4):			#state vectors
     if x[i] <= cutoff:
         q[i,0] = rhoL
         q[i,1] = rhoL*vL
@@ -47,11 +48,11 @@ for i in range(0, nx+2):			#state vectors
 """
 def boundary(q,boundary):
     if boundary == "flow":
-        q[0,:] = q[1,:]
-        q[nx+1,:] = q[nx,:]
+        q[0,:] , q[1,:] = q[2,:] , q[2,:]
+        q[nx+2,:] , q[nx+3,:] = q[nx+1,:] , q[nx+1,:]
     elif boundary == "periodic":
-        q[0,:] = q[nx,:]
-        q[nx+1,:] = q[1,:]
+        q[0,:] , q[1,:] = q[nx,:] , q[nx+1,:]
+        q[nx+2,:] , q[nx+3,:] = q[2,:] , q[3,:]
     return(q) 
 
 
@@ -77,7 +78,7 @@ def riemann_solver(q):
     maxv = max(max(lm), max(lp))		#max signal speed in grid, used to calculate dt
     
     #Then the HLL Riemann solver calculates flux across each interface:
-    for i in range(0, nx+1):
+    for i in range(0, nx+3):
         ap = max(0, lp[i], lp[i+1]) 	#forward signal speed used
         am = max(0, - lm[i], -lm[i+1])	#backward signal speed used (nb signs)
         fhll[i,:] = (ap*f[i,:] + am*f[i+1,:] - ap*am*(q[i+1,:] - q[i])) / (ap + am)
@@ -95,18 +96,24 @@ while t < tend:
         dt = CFL*dx/maxv
     except:
         dt = 1e-10
-        print("v=0 somewhere")
+        print("v=0 across cells")
         
     #perform time integration using Heun's method (predictor - corrector, same as AREPO)
     #NB CURRENTLY ONLY HAS FIRST STEP = EULER = FIRST ORDER
-    for i in range(1, nx+1):
+    for i in range(1, nx+3):
         L = - (fhll[i,:] - fhll[i-1,:])/dx
         qnew[i,:] = q[i,:] + L*dt
     qnew = boundary(qnew, "flow")
+    """fhllest, maxvest = riemann_solver(qest)
+    for i in range(1, nx+3):
+        Lest = (fhllest[i,:] - fhllest[i-1,:])/dx
+        qnew[i,:] = q[i,:] + 0.5*dt*(Lest + L)
+    q = qnew"""
     q = qnew
     #plt.plot(x, q[:,0])
     #plt.savefig("shock" + str(t) + ".pdf")
     #plt.close()
+    #print(dt)
     t+=dt
 
 plt.plot(x, q[:,0])
