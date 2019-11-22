@@ -11,8 +11,6 @@ x = np.full(nx+2, np.nan)			#cell centers
 xi = np.full(nx+3, np.nan)			#cell interfaces (interface i is left of cell i)
 W = np.full((nx+2, 3), np.nan)		#primitive state vector
 Wnew = np.full((nx+2, 3), np.nan)	#new primitive state vector
-f = np.full((nx+2, 3), np.nan)		#flux of cell centers
-fhll = np.full((nx+1, 3), np.nan)	#HLL flux across interface
 
 #set up initial conditions
 CFL = 0.5							#CFL criterion determining how short timesteps should be
@@ -22,8 +20,8 @@ tend = 0.2							#simulation ends after a step exceeds this time
 extent = 1.0						#spatial extent of grid
 cutoff = 0.5						#cutoff point for Left vs Right volume
 dx = extent/nx						#initial uniform separation between cells (may change later)
-rhoL, PL, vL = 1.0, 1.0, 1e-16 		#left volume
-rhoR, PR, vR = 0.1, 0.125, 1e-16	#right volume
+rhoL, PL, vL = 1.0, 1.0, 1e-16 		#left state
+rhoR, PR, vR = 0.1, 0.125, 1e-16	#right state
 
 #Populate vectors
 for i in range(0, nx+2):			#cell centers
@@ -71,29 +69,27 @@ def boundary(q,boundary):
         q[nx+1,:] = q[1,:]
     return(q) 
 
-
 """ Function to call HLL Riemann Solver
 	INPUT = primitive state vector, face velocity (array of size len(W)-1)
-	OUTPUT = vector of HLL fluxes across interface, max signal velocity present in array
+	OUTPUT = flux at face, primitive vector at face
 """
 def riemann_solver(W, vf):
-	"""#calculate face velocities
-	for i in range(0, nx+1):
-		v_L = W[i, 1]
-		v_R = W[i+1, 1]
-		v_f = (v_R + v_L)/2
-	"""
+	f = np.full((nx+2, 3), np.nan)		#flux of cell centers
+	fhll = np.full((nx+1, 3), np.nan)	#HLL flux at face
+	Uhll = np.full((nx+1, 3), np.nan)	#conserved vector at face
+	
 	#because the face velocity depends on L and R states, copy W into L and R arrays
 	WL, WR = np.copy(W), np.copy(W)
 	#transform into frame of face (with variable v for every face)
-	WL[:-1,1] -= vf #cell to left of interface
-	WR[1:,1] -= vf #cell to right of interface (=> i+1 for v corresponds to i for w)
+	WL[:-1,1] -= vf #cell to left of face
+	WR[1:,1] -= vf #cell to right of face (=> i+1 for v corresponds to i for w)
 	
+	#restore boundary conditions
+	WL = boundary(WL,"flow")
+	WR = boundary(WR,"flow")
 
-    U = convert_prim2cons(WL)
-    rho, E = WL[:,0], U[:,2]
-    v = WL[:,1]
-    P = WL[:,2]
+    rho, v, P = WL[:,0], WL[:,1], WL[:,2]
+	E = convert_prim2cons(WL)[:,2]
 
     #calculate flux
     f[:,0] = rho*v
@@ -104,7 +100,6 @@ def riemann_solver(W, vf):
     cs = np.sqrt(gamma*P/rho)			#isothermal sound speed
     lm = v - cs					#backward sound speed
     lp = v + cs					#forward sound speed
-    maxv = max(max(lm), max(lp))		#max signal speed in grid, used to calculate dt
     
     #Then the HLL Riemann solver calculates flux across each interface:
     for i in range(0, nx+1):
@@ -114,6 +109,12 @@ def riemann_solver(W, vf):
     
     return((fhll, maxv))
 
+"""#calculate face velocities
+	for i in range(0, nx+1):
+		v_L = W[i, 1]
+		v_R = W[i+1, 1]
+		v_f = (v_R + v_L)/2
+"""
 
 """ PERFORM ADVECTION IN A WHILE LOOP -- STOPS WHEN SIMULATION TIME IS EXCEEDED
 """

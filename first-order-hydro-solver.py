@@ -20,10 +20,10 @@ gamma = 1.4                         #gamma = heat capacity ratio
 t = 0								#start time (should be 0 in most cases...)
 tend = 0.2							#simulation ends after a step exceeds this time
 extent = 1.0						#spatial extent of grid
-cutoff = 0.5						#cutoff point for Left vs Right volume
+cutoff = 0.1						#cutoff point for Left vs Right volume
 dx = extent/nx						#initial uniform separation between cells (may change later)
-rhoL, PL, vL = 1.0, 1.0, 1e-16 		#left volume
-rhoR, PR, vR = 0.1, 0.125, 1e-16	#right volume
+rhoL, PL, vL = 1.0, 10.0, 1e-16 		#left volume
+rhoR, PR, vR = 1.0, 0.125, 1e-16	#right volume
 
 #Populate vectors
 for i in range(0, nx+2):			#cell centers
@@ -88,7 +88,7 @@ def riemann_solver(q):
 """ PERFORM ADVECTION IN A WHILE LOOP -- STOPS WHEN SIMULATION TIME IS EXCEEDED
 """
 while t < tend:
-    q = boundary(q, "flow")				#impose boundary conditions onto state vectors
+    q = boundary(q, "periodic")				#impose boundary conditions onto state vectors
     fhll, maxv = riemann_solver(q)		#apply Riemann Solver
     #calculate time step according to CFL criterion
     try:
@@ -102,7 +102,7 @@ while t < tend:
     for i in range(1, nx+1):
         L = - (fhll[i,:] - fhll[i-1,:])/dx
         qnew[i,:] = q[i,:] + L*dt
-    qnew = boundary(qnew, "flow")
+    qnew = boundary(qnew, "periodic")
     q = qnew
     #plt.plot(x, q[:,0])
     #plt.savefig("shock" + str(t) + ".pdf")
