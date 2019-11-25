@@ -72,8 +72,8 @@ def riemann_solver(q):
 
     #calculate signal speeds (l shorthand for lambda, as in Springel notes and in duffell notes)
     cs = np.sqrt(gamma*P/rho)			#isothermal sound speed
-    lm = v - cs							#backward sound speed
-    lp = v + cs							#forward sound speed
+    lm = v - cs					#backward sound speed
+    lp = v + cs					#forward sound speed
     maxv = max(max(lm), max(lp))		#max signal speed in grid, used to calculate dt
     
     #Then the HLL Riemann solver calculates flux across each interface:
