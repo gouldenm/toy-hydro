@@ -22,7 +22,7 @@ tend = 0.2							#simulation ends after a step exceeds this time
 extent = 1.0						#spatial extent of grid
 cutoff = 0.1						#cutoff point for Left vs Right volume
 dx = extent/nx						#initial uniform separation between cells (may change later)
-rhoL, PL, vL = 1.0, 10.0, 1e-16 		#left volume
+rhoL, PL, vL = 1.0, 1.0, 1e-16 		#left volume
 rhoR, PR, vR = 1.0, 0.125, 1e-16	#right volume
 
 #Populate vectors
@@ -102,7 +102,7 @@ while t < tend:
     for i in range(1, nx+1):
         L = - (fhll[i,:] - fhll[i-1,:])/dx
         qnew[i,:] = q[i,:] + L*dt
-    qnew = boundary(qnew, "periodic")
+    qnew = boundary(qnew, "flow")
     q = qnew
     #plt.plot(x, q[:,0])
     #plt.savefig("shock" + str(t) + ".pdf")

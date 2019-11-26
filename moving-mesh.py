@@ -17,8 +17,8 @@ def prim2cons(W, gamma):
 def cons2prim(U, gamma):
 	W = np.full((len(U), 3), np.nan)		#primitive state vector
 	W[:,0] = U[:,0]
-	W[:,1] = U[:,0]/U[:,1]
-	W[:,2] = (gamma-1)*(U[:,2] - (W[:,0]*W[:,1]**2)/2)
+	W[:,1] = U[:,1]/U[:,0]
+	W[:,2] = (gamma-1)*(U[:,2] - (U[:,1]**2/U[:,0])/2)
 	return(W)
 
 def prim2flux(W, gamma):
@@ -52,7 +52,8 @@ class mesh:
 				 IC = "soundwave",			#initial conditions flag: options = "soundwave" or "LRsplit"
 				 mesh_type = "Fixed",		#type of mesh movement: options = "Fixed" or "Lagrangian"
 				 fixed_v = 0,
-				 CFL=0.5, gamma=1.4):
+				 CFL=0.5, gamma=1.4,
+				 vL = 0, vR = 0):
 		self.nx, self.tend, self.xend = nx, tend, xend
 		self.CFL, self.gamma = CFL, gamma
 		self.IC, self.boundary = IC, boundary
@@ -66,21 +67,23 @@ class mesh:
 		self.vf = np.full(nx+1, fixed_v)			#velocity of cell faces
 		self.lm= np.full(nx+1, np.nan)				#Left signal velocity (keep for calculating dt)
 		self.lp= np.full(nx+1, np.nan)				#Right signal velocity (keep for calculating dt)
+		self.vL = vL
+		self.vR = vR
 	
 	"""Generate primitive vectors from Riemann-style L/R split"""
 	def get_W_LRsplit(self,
 					  cutoff = 0.5,								#cutoff point for Left vs Right volume
-					  rhoL = 1.0, PL = 1.0, vL = 1e-16,			#left state conditions
-					  rhoR = 0.1, PR =0.125, vR= 1e-16):		#right state conditions:
+					  rhoL = 1.0, PL = 1.0,			#left state conditions
+					  rhoR = 0.1, PR =0.125):		#right state conditions:
 		
 		for i in range(0, self.nx + 2):
 			if self.x[i] <= cutoff*self.xend:
 				self.W[i,0] = rhoL
-				self.W[i,1] = vL
+				self.W[i,1] = self.vL
 				self.W[i,2] = PL
 			else:
 				self.W[i,0] = rhoR
-				self.W[i,1] = vR
+				self.W[i,1] = self.vR
 				self.W[i,2] = PR
 	
 	
@@ -95,11 +98,11 @@ class mesh:
 		for i in range(0, self.nx+2):
 			if self.x[i] <= self.xend:
 				self.W[i,0] = rho_0 + drho*np.sin(k*self.x[i])
-				self.W[i,1] = c_s* (drho/rho_0)*np.sin(k*self.x[i])
+				self.W[i,1] = self.vL + c_s* (drho/rho_0)*np.sin(k*self.x[i])
 				self.W[i,2] = C*self.W[i,0]**self.gamma
 			else:
 				self.W[i,0] = rho_0
-				self.W[i,1] = 1e-16
+				self.W[i,1] = self.vL
 				self.W[i,2] = C*rho_0**self.gamma
 	
 	
@@ -128,7 +131,6 @@ class mesh:
 			v_L = self.v[i]
 			v_R = self.v[i+1]
 			self.vf[i] = (v_R + v_L)/2
-			
 		#	Transform lab-frame to face frame.	NB: Face frame may vary for every face => must compute WL, WR separately
 		WL, WR = np.copy(self.W)[:-1,:], np.copy(self.W)[1:,:]
 		WL[:,1] -= self.vf		# subtract face velocity from cell to LEFT of face
@@ -139,6 +141,8 @@ class mesh:
 		fR = prim2flux(WR, self.gamma)
 		
 		#	Calculate signal speeds
+		#print("WL for csl:", WL[:,2])
+		
 		csl = np.sqrt(self.gamma*WL[:,2]/WL[:,0])
 		csr = np.sqrt(self.gamma*WR[:,2]/WR[:,0])
 		self.lm = WL[:,1] - csl
@@ -207,38 +211,79 @@ class mesh:
 				self.W[1:-1,:] = np.roll(self.W[1:-1,:], axis=0,shift = -left_limit)
 				self.W = boundary(self.W, self.boundary)
 				self.x += (0 - self.x[1])
-		#TODO: If any cells lie outside spatial extent in flow regime, just delete and insert extras on the other side to balance
 	
 	
 	"""	Function tying everything together into a hydro solver"""
 	def solve(self):
-		self.setup()
+		print("\n\n")
+		#plt.figure()
+		plt.title(self.IC + " ," + self.mesh_type + ", v = " + str(self.v[0]))
+		plt.plot(self.x, self.W[:,0], label="Initial")
+		plt.pause(1)
 		t = 0
-		plotcount = 0
+		plotcount = 1
 		while t < self.tend:
 			print(t)
-			#print(self.W[:,0])
+			print("Initially W[rho]=", self.W[:,0])
 			self.W = boundary(self.W, self.boundary)
+			self.riemann_solver()
 			Uold = prim2cons(self.W, self.gamma)
 			Unew = np.copy(Uold)
-			self.setup()
-			self.riemann_solver()
+			print("Before Riemann, U[rho]=", Unew[:,0])
 			dt = self.CFL_condition()
 			#First order time integration using Euler's method
 			for i in range(1, self.nx+1):
 				L = - (self.fF[i,:] - self.fF[i-1,:])/self.cell_widths[i]
 				Unew[i,:] = Uold[i,:] + L*dt
+			print("After Riemann, U[rho]=", Unew[:,0])
 			Unew = boundary(Unew, self.boundary)
+			#print("After boundaries, U:", Unew[:5,2])
 			self.W = cons2prim(Unew, self.gamma)
-			if plotcount % 20 == 0:
+			print("After cons2prim, W[rho]=", self.W[:,0])
+			if plotcount % 2 == 0:
 				#plt.close()
-				plt.plot(self.x, self.W[:,2])
-				plt.pause(0.5)
+				plt.plot(self.x, self.W[:,0])
+				plt.pause(0.1)
+				t+=100
 			t+=dt	
 			plotcount+=1
+		plt.plot(self.x, self.W[:,0], label="t=" + str(t-dt))
+		plt.legend()
+		plt.xlabel("Position")
+		plt.ylabel("Density")
+		plt.pause(0.1)
 		
 
-grid = mesh(200, 0.5, 0.2, boundary = "flow", IC = "LRsplit")
+grid = mesh(100, 0.2, 1.0, boundary = "flow", IC = "LRsplit")
+grid.setup()
 grid.solve()
 
+#grid = mesh(500, 0.2, 1.0, boundary = "flow", IC = "LRsplit", fixed_v = 0.1)
+grid = mesh(100, 0.2, 1.0, boundary = "flow", IC = "LRsplit", fixed_v = 1.0, vL = 1, vR = 1)
+grid.setup()
+grid.solve()
+"""
+grid = mesh(500, 0.2, 1.0, boundary = "flow", IC = "LRsplit", mesh_type = "Lagrangian")
+grid.solve()
+
+grid = mesh(500, 0.2, 1.0, boundary = "flow", IC = "LRsplit", fixed_v = 1.0)
+grid.solve()
+
+plt.figure()
+gridsound = mesh(500, 1.0, 1.0, fixed_v = 0.0)
+gridsound.solve()
+
+gridsound = mesh(500, 1.0, 1.0, fixed_v = 1.0, vL=1.0)
+gridsound.solve()
+#plt.plot(gridsound.x, gridsound.W[:,0])
+
+gridsoundfixed = mesh(500, 1.0, 1.0)
+gridsoundfixed.solve()
+
+gridsoundfixed = mesh(500, 1.0, 1.0, mesh_type="Lagrangian")
+gridsoundfixed.solve()
+#plt.plot(gridsoundfixed.x, gridsoundfixed.W[:,0])
+"""
 plt.show()
+#grid.solve()
+
