@@ -29,10 +29,7 @@ def prim2flux(W, gamma):
 	return(F)
 
 
-"""	Function to impose boundary conditions onto primitive state vectors
-INPUT = prim state vector with ghost cells undefined / incorrect
-OUTPUT = prim state vector with properly defined ghost cells
-"""
+"""	Function to impose boundary conditions onto primitive state vectors"""
 def boundary(q,boundary):
    if boundary == "flow":
        q[0,:] = q[1,:]
@@ -73,8 +70,8 @@ class mesh:
 	"""Generate primitive vectors from Riemann-style L/R split"""
 	def get_W_LRsplit(self,
 					  cutoff = 0.5,								#cutoff point for Left vs Right volume
-					  rhoL = 1.0, PL = 1.0,			#left state conditions
-					  rhoR = 0.1, PR =0.125):		#right state conditions:
+					  rhoL = 1.0, PL = 1.0, 					#left state conditions
+					  rhoR = 0.1, PR =0.125):					#right state conditions:
 		
 		for i in range(0, self.nx + 2):
 			if self.x[i] <= cutoff*self.xend:
