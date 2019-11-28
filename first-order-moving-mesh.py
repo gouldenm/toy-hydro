@@ -94,8 +94,7 @@ class mesh:
 				self.W[i,0] = rhoB
 				self.W[i,1] = vB
 				self.W[i,2] = C*rhoB**self.gamma
-	
-	
+		
 	"""		Set up Primitive vectors		"""
 	def setup(self, 
 			  vB=0, rhoB=1.0, drho=1e-3, l=0.2, c_s=1.0,					#variables for soundwave
@@ -106,18 +105,16 @@ class mesh:
 			self.get_W_soundwave(rhoB, drho, l, c_s, vB)
 		elif self.IC == "LRsplit":
 			self.get_W_LRsplit(cutoff, rhoL, PL, vL, rhoR, PR, vR)
-	
+		
+		
 	"""HLL Riemann Solver; note this also updates self.v, self.lp, and self.lm"""
 	def riemann_solver(self):
 		fHLL = np.full((self.nx+1, 3), 0.)
 		
 		if self.mesh_type == "Lagrangian":
-			self.v = self.W[:,1]
-		#	Get face velocity as average of the adjacent cells
-		for i in range(0, self.nx+1):
-			v_L = self.v[i]
-			v_R = self.v[i+1]
-			self.vf[i] = (v_R + v_L)/2
+			self.v = np.copy(self.W[:,1])
+			self.vf = (self.v[:-1] + self.v[1:])/2
+			
 		#	Transform lab-frame to face frame.	NB: Face frame may vary for every face => must compute WL, WR separately
 		WL, WR = np.copy(self.W)[:-1,:], np.copy(self.W)[1:,:]
 		WL[:,1] -= self.vf		# subtract face velocity from cell to LEFT of face
@@ -150,11 +147,9 @@ class mesh:
 	
 	"""	Calculate time step duration according to Courant condition; note must be called after Riemann Solver generates v, lp, lm"""
 	def CFL_condition(self):
-		self.cell_widths[1:-1] = self.x[2:] - self.x[:-2]
-		self.cell_widths[0], self.cell_widths[-1] = self.cell_widths[1], self.cell_widths[-2]
 		dtm = self.CFL * self.cell_widths[:-1] / np.absolute(self.lm)
 		dtp = self.CFL * self.cell_widths[1: ] / np.absolute(self.lp)
-		mesh_v = 0#max(self.v)
+		mesh_v = max(self.v)
 		if mesh_v > 1e-16:
 			dt_mesh = self.CFL * self.cell_widths / np.absolute(self.v)
 			dt = min(min(dtm), min(dtp), min(dt_mesh))
@@ -165,11 +160,18 @@ class mesh:
 	
 	"""	Move cells (i.e. change x coordinate),rearrange cells if any fall off the grid boundaries
 		NB: doesn't work if grid cells exceed spatial extent on both sides """
-	def move_cells(self, dt):
+	def update_mesh(self, dt):
 		#  Modify x coordinate based on velocity of cell centre
+		#print("x ",self.x[96:104])
+		#print("v", self.v[96:104])
+		#print("vf",self.vf[96:104])
+		#print("W[v]",self.W[96:104,1])
 		self.x += self.v * dt
+		self.cell_widths[1:-1] = (self.x[2:] - self.x[:-2])*0.5
+		self.cell_widths[0], self.cell_widths[-1] = self.cell_widths[1], self.cell_widths[-2]
+		
+		"""
 		#  Check if any (non-ghost) cells exeed the spatial extent of the grid in + x direction
-		print(self.x)
 		right_limit, left_limit = 0, 0
 		i = 1
 		while i < self.nx + 1:
@@ -194,16 +196,14 @@ class mesh:
 			elif left_limit != 0:
 				self.W[1:-1,:] = np.roll(self.W[1:-1,:], axis=0,shift = -left_limit)
 				self.W = boundary(self.W, self.boundary)
-				self.x += (0 - self.x[1])
+				self.x += (0 - self.x[1])"""
 	
 	
 	"""	Function tying everything together into a hydro solver"""
 	def solve(self):
 		print("\n\n")
-		#plt.figure()
-		plt.title(self.IC + " ," + self.mesh_type + ", v = " + str(self.v[0]))
-		plt.plot(self.x, self.W[:,2], label="Initial")
-		plt.pause(1)
+		plt.plot(self.x, self.W[:,0], label="Initial W[v]")
+		plt.pause(0.1)
 		t = 0
 		plotcount = 1
 		while t < self.tend:
@@ -211,72 +211,137 @@ class mesh:
 			self.riemann_solver()
 			Uold = prim2cons(self.W, self.gamma)
 			Unew = np.copy(Uold)
-			#print("Before Riemann, U\n=", cons2prim(Unew, self.gamma)[47:52])
 			dt = self.CFL_condition()
-			#dt = 0.007
-			#print(t+dt)
-			#First order time integration using Euler's method
+			dt = min(self.tend-t, dt)
+			self.update_mesh(dt)
+			#	First order time integration using Euler's method
 			for i in range(1, self.nx+1):
 				L = - (self.fF[i,:] - self.fF[i-1,:])/self.cell_widths[i]
 				Unew[i,:] = Uold[i,:] + L*dt
-			#print("After Riemann, U\n=", Unew[47:52])
 			Unew = boundary(Unew, self.boundary)
 			self.W = cons2prim(Unew, self.gamma)
-			#print("After cons2prim, W\n=", self.W[47:52])
-			if plotcount % 10 == 0:
-				plt.scatter(self.x, self.W[:,2] , label="w="+str(self.v[0]) + ", t=" + str(t+dt))
-				plt.pause(0.1)
+			if plotcount % 200000 == 0:
+				break
+			#	#plt.plot(self.x, self.W[:,0] , label="w="+str(self.v[0]) + ", t=" + str(t+dt))
 			t+=dt	
+			print(t)
 			plotcount+=1
-		plt.legend()
-		plt.xlabel("Position")
-		plt.ylabel("Density")
-		plt.pause(0.1)
 		
-
-grid = mesh(100, 0.2, 1.0)
+"""
+grid = mesh(200, 0.2, 1.0)
 grid.setup(boundary = "flow", IC = "LRsplit")
 grid.solve()
+plt.plot(grid.x, grid.W[:,0] , label="w="+str(grid.v[0]) )
+plt.legend()
+plt.pause(0.5)
 
-grid = mesh(100, 0.2, 1.0,  fixed_v = 2.0)
+
+grid = mesh(200, 0.2, 1.0,  mesh_type="Lagrangian")
+grid.setup(boundary = "flow", IC = "LRsplit")
+grid.solve()
+plt.plot(grid.x, grid.W[:,0] , label="w="+str(grid.v[0]))
+plt.legend()
+plt.pause(0.5)
+
+
+grid = mesh(250, 0.2, 1.0,  fixed_v = 2.0)
 grid.setup(boundary = "flow", IC = "LRsplit", vL = 2, vR = 2)
 grid.solve()
+plt.plot(grid.x-0.4, grid.W[:,0] , label="w="+str(grid.v[0]) )
+plt.legend()
+plt.pause(0.5)
+
+
+
+grid = mesh(500, 0.2, 2.0,  fixed_v = -1)
+grid.setup(boundary = "flow", IC = "LRsplit",cutoff=0.25)
+grid.solve()
+plt.plot(grid.x, grid.W[:,0] , label="w="+str(grid.v[0]) )
+plt.legend()
+plt.pause(0.5)
+
+
+plt.xlabel("Position")
+plt.ylabel("Pressure")
+plt.pause(0.5)
 
 """
-grid = mesh(100, 0.2, 1.0,  fixed_v = 5.0)
-grid.setup(boundary = "flow", IC = "LRsplit", vL = 1, vR = 1)
-grid.solve()
 
 plt.figure()
-gridsound = mesh(500, 1.0, 1.0, fixed_v = 0.0)
-grid.setup()
-gridsound.solve()
 
+gridsound = mesh(500, 0.5, 1.0, mesh_type="Lagrangian")#fixed_v = 1.0)
+gridsound.setup(vB=-1)
+gridsound.solve()
+plt.plot(gridsound.x, gridsound.W[:,1], label="w="+str(gridsound.v[0]))
+plt.legend()
+plt.pause(0.5)
+
+plt.figure()
+gridsound = mesh(500, 0.5, 1.0, fixed_v = 1.0)
+gridsound.setup(vB=0)
+gridsound.solve()
+plt.plot(gridsound.x, gridsound.W[:,1], label="w="+str(gridsound.v[0]))
+plt.legend()
+plt.pause(0.5)
+"""
 gridsound = mesh(500, 1.0, 1.0, fixed_v = 1.0)
-grid.setup(vB=1.0)
+gridsound.setup()
 gridsound.solve()
+plt.plot(gridsound.x, gridsound.W[:,2], label="w="+str(gridsound.v[0]))
+plt.legend()
+plt.pause(0.5)
 
-grid = mesh(500, 0.2, 1.0, boundary = "flow", IC = "LRsplit", mesh_type = "Lagrangian")
-grid.solve()
+gridsound = mesh(500, 1.0, 1.0, fixed_v = 2.0)
+gridsound.setup()
+gridsound.solve()
+plt.plot(gridsound.x, gridsound.W[:,2], label="w="+str(gridsound.v[0]))
+plt.legend()
+plt.pause(0.5)
 
-grid = mesh(500, 0.2, 1.0, boundary = "flow", IC = "LRsplit", fixed_v = 1.0)
-grid.solve()
+gridsound = mesh(500, 1.0, 1.0, fixed_v = 2.0)
+gridsound.setup()
+gridsound.solve()
+plt.plot(gridsound.x, gridsound.W[:,2], label="w="+str(gridsound.v[0]))
+plt.legend()
+plt.pause(0.5)
+
+
 
 plt.figure()
-gridsound = mesh(500, 1.0, 1.0, fixed_v = 0.0)
+
+gridsound = mesh(2000, 1.0, 1.0, fixed_v = 0.0)
+gridsound.setup()
 gridsound.solve()
+plt.plot(gridsound.x, gridsound.W[:,2], label="w="+str(gridsound.v[0]))
+plt.legend()
+plt.pause(0.5)
 
-gridsound = mesh(500, 1.0, 1.0, fixed_v = 1.0, vL=1.0)
+gridsound = mesh(2000, 1.0, 1.0, fixed_v = 1.0)
+gridsound.setup(vB=1.0)
 gridsound.solve()
-#plt.plot(gridsound.x, gridsound.W[:,0])
+plt.plot(gridsound.x, gridsound.W[:,2], label="w="+str(gridsound.v[0]))
+plt.legend()
+plt.pause(0.5)
 
-gridsoundfixed = mesh(500, 1.0, 1.0)
-gridsoundfixed.solve()
+gridsound = mesh(2000, 1.0, 1.0, fixed_v = 1.0)
+gridsound.setup()
+gridsound.solve()
+plt.plot(gridsound.x, gridsound.W[:,2], label="w="+str(gridsound.v[0]))
+plt.legend()
+plt.pause(0.5)
 
-gridsoundfixed = mesh(500, 1.0, 1.0, mesh_type="Lagrangian")
-gridsoundfixed.solve()
-#plt.plot(gridsoundfixed.x, gridsoundfixed.W[:,0])
+gridsound = mesh(2000, 1.0, 1.0, fixed_v = 2.0)
+gridsound.setup()
+gridsound.solve()
+plt.plot(gridsound.x, gridsound.W[:,2], label="w="+str(gridsound.v[0]))
+plt.legend()
+plt.pause(0.5)
+
+gridsound = mesh(2000, 1.0, 1.0, fixed_v = 2.0)
+gridsound.setup()
+gridsound.solve()
+plt.plot(gridsound.x, gridsound.W[:,2], label="w="+str(gridsound.v[0]))
+plt.legend()
+plt.pause(0.5)
 """
 plt.show()
-#grid.solve()
-
