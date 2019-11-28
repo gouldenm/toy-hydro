@@ -170,7 +170,7 @@ class mesh:
 		self.cell_widths[1:-1] = (self.x[2:] - self.x[:-2])*0.5
 		self.cell_widths[0], self.cell_widths[-1] = self.cell_widths[1], self.cell_widths[-2]
 		
-		"""
+		
 		#  Check if any (non-ghost) cells exeed the spatial extent of the grid in + x direction
 		right_limit, left_limit = 0, 0
 		i = 1
@@ -196,7 +196,7 @@ class mesh:
 			elif left_limit != 0:
 				self.W[1:-1,:] = np.roll(self.W[1:-1,:], axis=0,shift = -left_limit)
 				self.W = boundary(self.W, self.boundary)
-				self.x += (0 - self.x[1])"""
+				self.x += (0 - self.x[1])
 	
 	
 	"""	Function tying everything together into a hydro solver"""
@@ -267,41 +267,62 @@ plt.pause(0.5)
 
 """
 
+t=0.2
+
 plt.figure()
 
-gridsound = mesh(500, 0.5, 1.0, mesh_type="Lagrangian")#fixed_v = 1.0)
+gridsound = mesh(1000,t, 1.0, mesh_type="Lagrangian")
 gridsound.setup(vB=-1)
 gridsound.solve()
-plt.plot(gridsound.x, gridsound.W[:,1], label="w="+str(gridsound.v[0]))
+plt.plot(gridsound.x, gridsound.W[:,0], label="Lagrangian")
 plt.legend()
 plt.pause(0.5)
 
+gridsound = mesh(1000,t, 1.0, mesh_type="Fixed")
+gridsound.setup(vB=-1)
+gridsound.solve()
+plt.plot(gridsound.x, gridsound.W[:,0], label="Eulerian")
+plt.legend()
+plt.pause(0.5)
+
+
+#Relative motion = 0, should be identical
 plt.figure()
-gridsound = mesh(500, 0.5, 1.0, fixed_v = 1.0)
+gridsound = mesh(1000, t, 1.0, fixed_v = 0)
 gridsound.setup(vB=0)
 gridsound.solve()
-plt.plot(gridsound.x, gridsound.W[:,1], label="w="+str(gridsound.v[0]))
+plt.plot(gridsound.x, gridsound.W[:,0], label="vB=0, w="+str(gridsound.v[0]))
 plt.legend()
 plt.pause(0.5)
+
+gridsound = mesh(500, t, 1.0, fixed_v = 1)
+gridsound.setup(vB=1)
+gridsound.solve()
+plt.plot(gridsound.x, gridsound.W[:,0], label="vB=1, w="+str(gridsound.v[0]))
+plt.legend()
+plt.pause(0.5)
+
 """
-gridsound = mesh(500, 1.0, 1.0, fixed_v = 1.0)
+#Relative motion = sound speed, should match initial conditions
+gridsound = mesh(500, t, 1.0, fixed_v = 1.0)
 gridsound.setup()
 gridsound.solve()
-plt.plot(gridsound.x, gridsound.W[:,2], label="w="+str(gridsound.v[0]))
+plt.plot(gridsound.x, gridsound.W[:,0], label="vB=0, w="+str(gridsound.v[0]))
 plt.legend()
 plt.pause(0.5)
 
-gridsound = mesh(500, 1.0, 1.0, fixed_v = 2.0)
-gridsound.setup()
+gridsound = mesh(500, t, 1.0, fixed_v = 0)
+gridsound.setup(vB=-1)
 gridsound.solve()
-plt.plot(gridsound.x, gridsound.W[:,2], label="w="+str(gridsound.v[0]))
+plt.plot(gridsound.x, gridsound.W[:,0], label="vB=-1, w="+str(gridsound.v[0]))
 plt.legend()
 plt.pause(0.5)
 
-gridsound = mesh(500, 1.0, 1.0, fixed_v = 2.0)
+#Random faster speed for comparison
+gridsound = mesh(500, t, 1.0, fixed_v = 2.0)
 gridsound.setup()
 gridsound.solve()
-plt.plot(gridsound.x, gridsound.W[:,2], label="w="+str(gridsound.v[0]))
+plt.plot(gridsound.x, gridsound.W[:,0], label="w="+str(gridsound.v[0]))
 plt.legend()
 plt.pause(0.5)
 
