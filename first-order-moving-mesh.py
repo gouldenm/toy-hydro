@@ -107,10 +107,9 @@ class mesh:
 		elif self.IC == "LRsplit":
 			self.get_W_LRsplit(cutoff, rhoL, PL, vL, rhoR, PR, vR)
 	
-	#TODO: TIDY UP AFTER THIS POINT
 	"""HLL Riemann Solver; note this also updates self.v, self.lp, and self.lm"""
 	def riemann_solver(self):
-		fHLL = np.full((self.nx+1, 3), np.nan)
+		fHLL = np.full((self.nx+1, 3), 0.)
 		
 		if self.mesh_type == "Lagrangian":
 			self.v = self.W[:,1]
@@ -133,14 +132,13 @@ class mesh:
 		csr = np.sqrt(self.gamma*WR[:,2]/WR[:,0])
 		self.lm = WL[:,1] - csl
 		self.lp = WR[:,1] + csr
-			
+		
 		#	Calculate HLL flux in frame of FACE
 		for i in range(0, self.nx+1):
 			if self.lm[i] >= 0:
 				fHLL[i,:] = fL[i,:]
 			elif self.lm[i] < 0 and 0 < self.lp[i]:
 				fHLL[i,:] = ( self.lp[i]*fL[i,:] - self.lm[i]*fR[i,:] + self.lp[i]*self.lm[i]*(UR[i,:] - UL[i,:]) ) / (self.lp[i]-self.lm[i])
-				if i == 50: print(49,  fHLL[48:51,:])
 			else:
 				fHLL[i,:] = fR[i,:]
 		
@@ -148,9 +146,7 @@ class mesh:
 		self.fF = np.copy(fHLL)
 		self.fF[:,1] += fHLL[:,0]*self.vf
 		self.fF[:,2] += 0.5*fHLL[:,0]*self.vf**2 + fHLL[:,1]*self.vf
-		#print(49,  self.fF[48:51,:])
-		#print("__", np.diff(self.fF[48:51], axis=0))
-	
+		
 	
 	"""	Calculate time step duration according to Courant condition; note must be called after Riemann Solver generates v, lp, lm"""
 	def CFL_condition(self):
