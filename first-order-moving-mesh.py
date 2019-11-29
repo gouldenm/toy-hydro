@@ -62,8 +62,7 @@ class mesh:
 		#	Attributes that will be used later:
 		self.boundary, self.IC = None, None							#Boundary type, initial condition type
 		self.W = np.full((self.nx+2, 3), np.nan)					#primitive vector (lab frame)
-		self.Qold = np.full((self.nx+2, 3), np.nan)					#Integrated conserved vector
-		self.Qnew = np.full((self.nx+2, 3), np.nan)					#Integrated conserved vector
+		self.Q = np.full((self.nx+2, 3), np.nan)					#Integrated conserved vector
 		self.fF = np.full((nx+1, 3), np.nan)						#Net flux across face (lab frame)
 		self.lm = np.full(nx+1,np.nan)								#Left signal velocity	
 		self.lp = np.full(nx+1,np.nan)								#Right signal velocity
@@ -109,7 +108,8 @@ class mesh:
 			self.get_W_LRsplit(cutoff, rhoL, PL, vL, rhoR, PR, vR)
 			
 		# Compute conserved quantities.
-		
+		U = prim2cons(self.W, self.gamma)
+		self.Q = U * self.dx.reshape(-1,1)
 		
 	"""HLL Riemann Solver; note this also updates self.v, self.lp, and self.lm"""
 	def riemann_solver(self):#, Wl, Wr, vf):
@@ -205,15 +205,16 @@ class mesh:
 		plotcount = 1
 		while t < self.tend:
 			# 1) Compute primitive
-			self.W = boundary(self.W, self.boundary)
-			
+			U = self.Q / self.dx.reshape(-1,1)
+			self.W = cons2prim(U, self.gamma)
+		
 			# 2) Compute edge states
-			
+			self.W = boundary(self.W, self.boundary)
 			
 			# 3) Compute fluxes
 			self.riemann_solver()
 			Uold = prim2cons(self.W, self.gamma) 
-			Qold = Uold * self.dx.reshape(-1,1)
+			Qold = Uold * self.dx.reshape(-1,1)		#nb use old dx here to get old Q
 			Unew = np.copy(Uold) 
 			
 			# 4) Compute Courant condition
@@ -225,15 +226,12 @@ class mesh:
 			
 			#	6) First order time integration using Euler's method
 			L = - np.diff(self.fF, axis=0)
-			
 			Unew[1:-1] = (Qold[1:-1] + L*dt) / self.dx[1:-1].reshape(-1,1)
-		
-			#Unew = boundary(Unew, self.boundary)
-			self.W = cons2prim(Unew, self.gamma)
+			self.Q = Unew * self.dx.reshape(-1,1)	#nb use new dx here to get new Q
+			
 			if plotcount % 100000000 == 0:
 				plt.plot(self.x, self.W[:,0] , label="w="+str(self.v[0]) + ", t=" + str(t+dt))
 			t+=dt	
-			#print(t)
 			plotcount+=1
 			
 	@property
