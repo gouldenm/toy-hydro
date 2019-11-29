@@ -1,6 +1,12 @@
 """ A toy model for hydro simulations, used to test things before trying out Arepo.
 	Author: Maggie Celeste
 	Date: 07/11/2019
+	UPDATE: Added moving mesh as of 27/11/2019
+	
+	To run a hydro sim:
+	1. Initialize a mesh instance
+	2. Run mesh.setup(), with whatever conditions you like
+	3. Run mesh.solve()
 """
 import numpy as np
 import matplotlib.pyplot as plt
@@ -40,94 +46,79 @@ def boundary(q,boundary):
    return(q)
 	
 
-"""	Class to hold all information on the mesh"""
 class mesh:
-	"""Establish empty vectors that will sit on the mesh + constants"""
-	def __init__(self, nx,					#number of (non-ghost) cells
-				 tend, xend,				#simulation cutoff time, spatial extent of grid
-				 boundary = "periodic", 	#boundary conditions: options = "flow" or "periodic"
-				 IC = "soundwave",			#initial conditions flag: options = "soundwave" or "LRsplit"
-				 mesh_type = "Fixed",		#type of mesh movement: options = "Fixed" or "Lagrangian"
-				 fixed_v = 0,
-				 CFL=0.5, gamma=1.4,
-				 vL = 0, vR = 0):
-		self.nx, self.tend, self.xend = nx, tend, xend
-		self.CFL, self.gamma = CFL, gamma
-		self.IC, self.boundary = IC, boundary
+	def __init__(self, 					
+				 nx, tend, xend,					#number of (non-ghost) cells, simulation cutoff time, spatial extent of grid
+				 mesh_type = "Fixed", fixed_v = 0.,	#type of mesh movement (options = "Fixed" or "Lagrangian"), velocity of fixed grid
+				 CFL=0.5, gamma=1.4):
+		#	Establishing grid:
+		self.nx, self.tend, self.xend, self.CFL, self.gamma = nx, tend, xend, CFL, gamma
 		self.mesh_type = mesh_type
+		self.v = np.full(nx+2, fixed_v)								#velocity of cell centres -- defaults to 0 for Eulerian mesh
+		self.vf = np.full(nx+1, fixed_v)							#velocity of cell faces -- defaults to same as cell centres
+		self.cell_widths = np.full(nx+2, self.xend/(self.nx-1) ) 	#size of cell -- initially uniform across all cells
+		self.x = np.arange(0, nx+2)*(self.cell_widths[0])			#position of cell centre
 		
-		self.x = np.full(nx+2, np.nan)				#position of cell centre
-		self.cell_widths = np.full(nx+2, np.nan)	#size of cell
-		self.W = np.full((nx+2, 3), np.nan)			#primitive state vectors (at cell centres)
-		self.fF = np.full((nx+1, 3), np.nan)		#Net flux across face (lab frame)
-		self.v = np.full(nx+2, fixed_v)				#velocity of cell centres -- defaults to 0 for Eulerian mesh
-		self.vf = np.full(nx+1, fixed_v)			#velocity of cell faces
-		self.lm= np.full(nx+1, np.nan)				#Left signal velocity (keep for calculating dt)
-		self.lp= np.full(nx+1, np.nan)				#Right signal velocity (keep for calculating dt)
-		self.vL = vL
-		self.vR = vR
+		#	Attributes that will be used later:
+		self.boundary, self.IC = None, None							#Boundary type, initial condition type
+		self.W = np.full((self.nx+2, 3), np.nan)					#primitive vector (lab frame)
+		self.fF = np.full((nx+1, 3), np.nan)						#Net flux across face (lab frame)
+		self.lm = np.full(nx+1,np.nan)								#Left signal velocity	
+		self.lp = np.full(nx+1,np.nan)								#Right signal velocity
 	
-	"""Generate primitive vectors from Riemann-style L/R split"""
-	def get_W_LRsplit(self,
-					  cutoff = 0.5,								#cutoff point for Left vs Right volume
-					  rhoL = 1.0, PL = 1.0, 					#left state conditions
-					  rhoR = 0.1, PR =0.125):					#right state conditions:
-		
+	"""		Generate primitive vectors from Riemann-style Left/Right split		"""
+	def get_W_LRsplit(self, cutoff, 				#cutoff tells where L/R boundary is
+					  rhoL, PL, vL, rhoR, PR, vR):	#conditions on left, right
 		for i in range(0, self.nx + 2):
 			if self.x[i] <= cutoff*self.xend:
 				self.W[i,0] = rhoL
-				self.W[i,1] = self.vL
+				self.W[i,1] = vL
 				self.W[i,2] = PL
 			else:
 				self.W[i,0] = rhoR
-				self.W[i,1] = self.vR
+				self.W[i,1] = vR
 				self.W[i,2] = PR
 	
 	
-	"""Generate primitive vectors from soundwave criteria"""
-	def get_W_soundwave(self,
-						rho_0 = 1.0, drho = 1e-3,		#background density, density wave amplitude
-						l = 0.2,						#wavelength
-						c_s = 1.0):						#sound speed
-		
-		C = c_s**2*rho_0**(1-self.gamma)/(self.gamma)  #P = C*rho^gamma
+	"""		Generate primitive vectors from soundwave criteria		"""
+	def get_W_soundwave(self, rhoB, drho,		#background density, density wave amplitude
+						l, c_s, vB):			#wavelength, sound speed, bulk velocity
+		C = c_s**2*rhoB**(1-self.gamma)/(self.gamma)  	#P = C*rho^gamma
 		k = 2*np.pi/l
 		for i in range(0, self.nx+2):
-			if self.x[i] <= self.xend:
-				self.W[i,0] = rho_0 + drho*np.sin(k*self.x[i])
-				self.W[i,1] = self.vL + c_s* (drho/rho_0)*np.sin(k*self.x[i])
+			if self.x[i] <= l:
+				self.W[i,0] = rhoB + drho*np.sin(k*self.x[i])
+				self.W[i,1] = vB + c_s* (drho/rhoB)*np.sin(k*self.x[i])
 				self.W[i,2] = C*self.W[i,0]**self.gamma
 			else:
-				self.W[i,0] = rho_0
-				self.W[i,1] = self.vL
-				self.W[i,2] = C*rho_0**self.gamma
+				self.W[i,0] = rhoB
+				self.W[i,1] = vB
+				self.W[i,2] = C*rhoB**self.gamma
 	
 	
-	"""Populate vectors in the mesh"""
-	def setup(self):
-		#	grid is initially uniformly spaced by dx, st x[1]=0 and x[-2]=xend:
-		dx = self.xend / (self.nx -1)
-		#	Cell centres
-		for i in range(0, self.nx+2):
-			self.x[i] = (i-1.0)*dx
-		# 	Primitive vectors
+	"""		Set up Primitive vectors		"""
+	def setup(self, 
+			  vB=0, rhoB=1.0, drho=1e-3, l=0.2, c_s=1.0,					#variables for soundwave
+			  vL=0, vR=0, rhoL=1.0, rhoR=0.1, PL=1.0, PR=0.125, cutoff=0.5,	#variables for Riemann split
+			  IC="soundwave", boundary="periodic"):							#initial conditions type = "soundwave" or "LRsplit", boundary="periodic" or "flow"
+		self.IC, self.boundary = IC, boundary
 		if self.IC == "soundwave":
-			self.get_W_soundwave()
+			self.get_W_soundwave(rhoB, drho, l, c_s, vB)
 		elif self.IC == "LRsplit":
-			self.get_W_LRsplit()
-	
+			self.get_W_LRsplit(cutoff, rhoL, PL, vL, rhoR, PR, vR)
 	
 	"""HLL Riemann Solver; note this also updates self.v, self.lp, and self.lm"""
 	def riemann_solver(self):
-		fHLL = np.full((self.nx+1, 3), np.nan)
+		fHLL = np.full((self.nx+1, 3), 0.)
 		
 		if self.mesh_type == "Lagrangian":
-			self.v = self.W[:,1]
-		#	Get face velocity as average of the adjacent cells
+			self.v = np.copy(self.W[:,1])
+			#	Get face velocity as average of the adjacent cells
 		for i in range(0, self.nx+1):
 			v_L = self.v[i]
 			v_R = self.v[i+1]
 			self.vf[i] = (v_R + v_L)/2
+			#print(v_R, v_L, self.vf[i])
 		#	Transform lab-frame to face frame.	NB: Face frame may vary for every face => must compute WL, WR separately
 		WL, WR = np.copy(self.W)[:-1,:], np.copy(self.W)[1:,:]
 		WL[:,1] -= self.vf		# subtract face velocity from cell to LEFT of face
@@ -138,13 +129,11 @@ class mesh:
 		fR = prim2flux(WR, self.gamma)
 		
 		#	Calculate signal speeds
-		#print("WL for csl:", WL[:,2])
-		
 		csl = np.sqrt(self.gamma*WL[:,2]/WL[:,0])
 		csr = np.sqrt(self.gamma*WR[:,2]/WR[:,0])
 		self.lm = WL[:,1] - csl
 		self.lp = WR[:,1] + csr
-			
+		
 		#	Calculate HLL flux in frame of FACE
 		for i in range(0, self.nx+1):
 			if self.lm[i] >= 0:
@@ -155,18 +144,16 @@ class mesh:
 				fHLL[i,:] = fR[i,:]
 		
 		#	Calculate net flux in frame of LAB
-		self.fF = fHLL
+		self.fF = np.copy(fHLL)
 		self.fF[:,1] += fHLL[:,0]*self.vf
 		self.fF[:,2] += 0.5*fHLL[:,0]*self.vf**2 + fHLL[:,1]*self.vf
-	
+		
 	
 	"""	Calculate time step duration according to Courant condition; note must be called after Riemann Solver generates v, lp, lm"""
 	def CFL_condition(self):
-		self.cell_widths[1:-1] = self.x[2:] - self.x[:-2]
-		self.cell_widths[0], self.cell_widths[-1] = self.cell_widths[1], self.cell_widths[-2]
 		dtm = self.CFL * self.cell_widths[:-1] / np.absolute(self.lm)
 		dtp = self.CFL * self.cell_widths[1: ] / np.absolute(self.lp)
-		mesh_v = max(self.v)
+		mesh_v = 0#max(self.v)
 		if mesh_v > 1e-16:
 			dt_mesh = self.CFL * self.cell_widths / np.absolute(self.v)
 			dt = min(min(dtm), min(dtp), min(dt_mesh))
@@ -177,12 +164,12 @@ class mesh:
 	
 	"""	Move cells (i.e. change x coordinate),rearrange cells if any fall off the grid boundaries
 		NB: doesn't work if grid cells exceed spatial extent on both sides """
-	def move_cells(self, dt):
+	def update_mesh(self, dt):
 		#  Modify x coordinate based on velocity of cell centre
 		self.x += self.v * dt
+		self.cell_widths[1:-1] = (self.x[2:] - self.x[:-2])*0.5
+		self.cell_widths[0], self.cell_widths[-1] = self.cell_widths[1], self.cell_widths[-2]
 		#  Check if any (non-ghost) cells exeed the spatial extent of the grid in + x direction
-		print(self.x)
-		self.x += 0.09
 		right_limit, left_limit = 0, 0
 		i = 1
 		while i < self.nx + 1:
@@ -220,67 +207,72 @@ class mesh:
 		t = 0
 		plotcount = 1
 		while t < self.tend:
-			print(t)
-			print("Initially W[rho]=", self.W[:,0])
 			self.W = boundary(self.W, self.boundary)
 			self.riemann_solver()
 			Uold = prim2cons(self.W, self.gamma)
 			Unew = np.copy(Uold)
-			print("Before Riemann, U[rho]=", Unew[:,0])
 			dt = self.CFL_condition()
-			#First order time integration using Euler's method
+			self.update_mesh(dt)
+			print(str(t+dt), self.cell_widths[self.cell_widths > 0.01])
+		
 			for i in range(1, self.nx+1):
 				L = - (self.fF[i,:] - self.fF[i-1,:])/self.cell_widths[i]
 				Unew[i,:] = Uold[i,:] + L*dt
-			print("After Riemann, U[rho]=", Unew[:,0])
+			#print("After Riemann, U\n=", Unew[47:52])
 			Unew = boundary(Unew, self.boundary)
-			#print("After boundaries, U:", Unew[:5,2])
 			self.W = cons2prim(Unew, self.gamma)
-			print("After cons2prim, W[rho]=", self.W[:,0])
-			if plotcount % 2 == 0:
-				#plt.close()
+			#print("After cons2prim, W\n=", self.W[47:52])
+			if plotcount % 2000 == 0:
 				plt.plot(self.x, self.W[:,0])
 				plt.pause(0.1)
-				t+=100
 			t+=dt	
 			plotcount+=1
-		plt.plot(self.x, self.W[:,0], label="t=" + str(t-dt))
 		plt.legend()
 		plt.xlabel("Position")
 		plt.ylabel("Density")
 		plt.pause(0.1)
 		
 
-grid = mesh(100, 0.2, 1.0, boundary = "flow", IC = "LRsplit")
-grid.setup()
-grid.solve()
-
-#grid = mesh(500, 0.2, 1.0, boundary = "flow", IC = "LRsplit", fixed_v = 0.1)
-grid = mesh(100, 0.2, 1.0, boundary = "flow", IC = "LRsplit", fixed_v = 1.0, vL = 1, vR = 1)
-grid.setup()
-grid.solve()
-"""
-grid = mesh(500, 0.2, 1.0, boundary = "flow", IC = "LRsplit", mesh_type = "Lagrangian")
-grid.solve()
-
-grid = mesh(500, 0.2, 1.0, boundary = "flow", IC = "LRsplit", fixed_v = 1.0)
-grid.solve()
-
 plt.figure()
-gridsound = mesh(500, 1.0, 1.0, fixed_v = 0.0)
-gridsound.solve()
+grid = mesh(200, 0.2, 1.0,  mesh_type="Lagrangian")
+grid.setup(boundary = "flow", IC = "LRsplit")
+grid.solve()
+plt.plot(grid.x, grid.W[:,0] , label="w="+str(grid.v[0]) )
+plt.legend()
+plt.pause(0.5)
 
-gridsound = mesh(500, 1.0, 1.0, fixed_v = 1.0, vL=1.0)
-gridsound.solve()
-#plt.plot(gridsound.x, gridsound.W[:,0])
-
-gridsoundfixed = mesh(500, 1.0, 1.0)
-gridsoundfixed.solve()
-
-gridsoundfixed = mesh(500, 1.0, 1.0, mesh_type="Lagrangian")
-gridsoundfixed.solve()
-#plt.plot(gridsoundfixed.x, gridsoundfixed.W[:,0])
 """
+grid = mesh(200, 0.2, 1.0)
+grid.setup(boundary = "flow", IC = "LRsplit")
+grid.solve()
+plt.plot(grid.x, grid.W[:,0] , label="w="+str(grid.v[0]) )
+plt.legend()
+plt.pause(0.5)
+plt.show()
+"""
+"""
+grid = mesh(250, 0.2, 1.0,  fixed_v = 2.0)
+grid.setup(boundary = "flow", IC = "LRsplit", vL = 2, vR = 2)
+grid.solve()
+plt.plot(grid.x-0.4, grid.W[:,0] , label="w="+str(grid.v[0]) )
+plt.legend()
+plt.pause(0.5)
+
+
+
+grid = mesh(500, 0.2, 2.0,  fixed_v = -1)
+grid.setup(boundary = "flow", IC = "LRsplit",cutoff=0.25)
+grid.solve()
+plt.plot(grid.x, grid.W[:,0] , label="w="+str(grid.v[0]) )
+plt.legend()
+plt.pause(0.5)
+
+
+plt.xlabel("Position")
+plt.ylabel("Pressure")
+plt.pause(0.5)
+
 plt.show()
 #grid.solve()
-
+"""
+plt.show()

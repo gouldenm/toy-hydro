@@ -56,12 +56,14 @@ class mesh:
 		self.mesh_type = mesh_type
 		self.v = np.full(nx+2, fixed_v)								#velocity of cell centres -- defaults to 0 for Eulerian mesh
 		self.vf = np.full(nx+1, fixed_v)							#velocity of cell faces -- defaults to same as cell centres
-		self.cell_widths = np.full(nx+2, self.xend/(self.nx-1) ) 	#size of cell -- initially uniform across all cells
-		self.x = np.arange(0, nx+2)*(self.cell_widths[0])			#position of cell centre
+		self.dx = np.full(nx+2, self.xend/(self.nx-1) ) 	#size of cell -- initially uniform across all cells
+		self.x = np.arange(0, nx+2)*(self.dx[0])			#position of cell centre
 		
 		#	Attributes that will be used later:
 		self.boundary, self.IC = None, None							#Boundary type, initial condition type
 		self.W = np.full((self.nx+2, 3), np.nan)					#primitive vector (lab frame)
+		self.Qold = np.full((self.nx+2, 3), np.nan)					#Integrated conserved vector
+		self.Qnew = np.full((self.nx+2, 3), np.nan)					#Integrated conserved vector
 		self.fF = np.full((nx+1, 3), np.nan)						#Net flux across face (lab frame)
 		self.lm = np.full(nx+1,np.nan)								#Left signal velocity	
 		self.lp = np.full(nx+1,np.nan)								#Right signal velocity
@@ -105,15 +107,18 @@ class mesh:
 			self.get_W_soundwave(rhoB, drho, l, c_s, vB)
 		elif self.IC == "LRsplit":
 			self.get_W_LRsplit(cutoff, rhoL, PL, vL, rhoR, PR, vR)
+			
+		# Compute conserved quantities.
 		
 		
 	"""HLL Riemann Solver; note this also updates self.v, self.lp, and self.lm"""
-	def riemann_solver(self):
+	def riemann_solver(self):#, Wl, Wr, vf):
 		fHLL = np.full((self.nx+1, 3), 0.)
 		
 		if self.mesh_type == "Lagrangian":
 			self.v = np.copy(self.W[:,1])
 			self.vf = (self.v[:-1] + self.v[1:])/2
+
 			
 		#	Transform lab-frame to face frame.	NB: Face frame may vary for every face => must compute WL, WR separately
 		WL, WR = np.copy(self.W)[:-1,:], np.copy(self.W)[1:,:]
@@ -130,7 +135,7 @@ class mesh:
 		self.lm = WL[:,1] - csl
 		self.lp = WR[:,1] + csr
 		
-		#	Calculate HLL flux in frame of FACE
+		#	Calculate HLL flux in frame of FACE	
 		for i in range(0, self.nx+1):
 			if self.lm[i] >= 0:
 				fHLL[i,:] = fL[i,:]
@@ -138,6 +143,8 @@ class mesh:
 				fHLL[i,:] = ( self.lp[i]*fL[i,:] - self.lm[i]*fR[i,:] + self.lp[i]*self.lm[i]*(UR[i,:] - UL[i,:]) ) / (self.lp[i]-self.lm[i])
 			else:
 				fHLL[i,:] = fR[i,:]
+				
+		
 		
 		#	Calculate net flux in frame of LAB
 		self.fF = np.copy(fHLL)
@@ -145,16 +152,11 @@ class mesh:
 		self.fF[:,2] += 0.5*fHLL[:,0]*self.vf**2 + fHLL[:,1]*self.vf
 		
 	
-	"""	Calculate time step duration according to Courant condition; note must be called after Riemann Solver generates v, lp, lm"""
+	"""	Calculate time step duration according to Courant condition"""
 	def CFL_condition(self):
-		dtm = self.CFL * self.cell_widths[:-1] / np.absolute(self.lm)
-		dtp = self.CFL * self.cell_widths[1: ] / np.absolute(self.lp)
-		mesh_v = max(self.v)
-		if mesh_v > 1e-16:
-			dt_mesh = self.CFL * self.cell_widths / np.absolute(self.v)
-			dt = min(min(dtm), min(dtp), min(dt_mesh))
-		else:
-			dt = min(min(dtm), min(dtp))
+		dtm = self.CFL * self.dx[:-1] / np.absolute(self.lm)
+		dtp = self.CFL * self.dx[1: ] / np.absolute(self.lp)
+		dt = min(min(dtm), min(dtp))
 		return(dt)
 	
 	
@@ -162,14 +164,10 @@ class mesh:
 		NB: doesn't work if grid cells exceed spatial extent on both sides """
 	def update_mesh(self, dt):
 		#  Modify x coordinate based on velocity of cell centre
-		#print("x ",self.x[96:104])
-		#print("v", self.v[96:104])
-		#print("vf",self.vf[96:104])
-		#print("W[v]",self.W[96:104,1])
 		self.x += self.v * dt
-		self.cell_widths[1:-1] = (self.x[2:] - self.x[:-2])*0.5
-		self.cell_widths[0], self.cell_widths[-1] = self.cell_widths[1], self.cell_widths[-2]
-		
+		self.dx[1:-1] = (self.x[2:] - self.x[:-2])*0.5
+		self.dx[0], self.dx[-1] = self.dx[1], self.dx[-2]
+		return 
 		
 		#  Check if any (non-ghost) cells exeed the spatial extent of the grid in + x direction
 		right_limit, left_limit = 0, 0
@@ -202,46 +200,65 @@ class mesh:
 	"""	Function tying everything together into a hydro solver"""
 	def solve(self):
 		print("\n\n")
-		plt.plot(self.x, self.W[:,0], label="Initial W[v]")
 		plt.pause(0.1)
 		t = 0
 		plotcount = 1
 		while t < self.tend:
+			# 1) Compute primitive
 			self.W = boundary(self.W, self.boundary)
+			
+			# 2) Compute edge states
+			
+			
+			# 3) Compute fluxes
 			self.riemann_solver()
-			Uold = prim2cons(self.W, self.gamma)
-			Unew = np.copy(Uold)
+			Uold = prim2cons(self.W, self.gamma) 
+			Qold = Uold * self.dx.reshape(-1,1)
+			Unew = np.copy(Uold) 
+			
+			# 4) Compute Courant condition
 			dt = self.CFL_condition()
 			dt = min(self.tend-t, dt)
+			
+			# 5) Update mesh.
 			self.update_mesh(dt)
-			#	First order time integration using Euler's method
-			for i in range(1, self.nx+1):
-				L = - (self.fF[i,:] - self.fF[i-1,:])/self.cell_widths[i]
-				Unew[i,:] = Uold[i,:] + L*dt
-			Unew = boundary(Unew, self.boundary)
-			self.W = cons2prim(Unew, self.gamma)
-			if plotcount % 200000 == 0:
-				break
-			#	#plt.plot(self.x, self.W[:,0] , label="w="+str(self.v[0]) + ", t=" + str(t+dt))
-			t+=dt	
-			print(t)
-			plotcount+=1
+			
+			#	6) First order time integration using Euler's method
+			L = - np.diff(self.fF, axis=0)
+			
+			Unew[1:-1] = (Qold[1:-1] + L*dt) / self.dx[1:-1].reshape(-1,1)
 		
-"""
-grid = mesh(200, 0.2, 1.0)
-grid.setup(boundary = "flow", IC = "LRsplit")
-grid.solve()
-plt.plot(grid.x, grid.W[:,0] , label="w="+str(grid.v[0]) )
-plt.legend()
-plt.pause(0.5)
-
+			#Unew = boundary(Unew, self.boundary)
+			self.W = cons2prim(Unew, self.gamma)
+			if plotcount % 100000000 == 0:
+				plt.plot(self.x, self.W[:,0] , label="w="+str(self.v[0]) + ", t=" + str(t+dt))
+			t+=dt	
+			#print(t)
+			plotcount+=1
+			
+	@property
+	def pressure(self):
+		return "Do some work"
+		
+		
 
 grid = mesh(200, 0.2, 1.0,  mesh_type="Lagrangian")
 grid.setup(boundary = "flow", IC = "LRsplit")
+plt.scatter(grid.x, grid.W[:,0] ,label="Initial W[v]")
 grid.solve()
-plt.plot(grid.x, grid.W[:,0] , label="w="+str(grid.v[0]))
+plt.scatter(grid.x, grid.W[:,0] , label="w="+str(grid.v[0]))
 plt.legend()
 plt.pause(0.5)
+
+
+grid = mesh(200, 0.2, 1.0)
+grid.setup(boundary = "flow", IC = "LRsplit")
+grid.solve()
+plt.scatter(grid.x, grid.W[:,0] , label="w="+str(grid.v[0]) )
+plt.legend()
+plt.pause(0.5)
+"""
+
 
 
 grid = mesh(250, 0.2, 1.0,  fixed_v = 2.0)
@@ -265,7 +282,7 @@ plt.xlabel("Position")
 plt.ylabel("Pressure")
 plt.pause(0.5)
 
-"""
+
 
 t=0.2
 
@@ -301,7 +318,7 @@ gridsound.solve()
 plt.plot(gridsound.x, gridsound.W[:,0], label="vB=1, w="+str(gridsound.v[0]))
 plt.legend()
 plt.pause(0.5)
-
+"""
 """
 #Relative motion = sound speed, should match initial conditions
 gridsound = mesh(500, t, 1.0, fixed_v = 1.0)
@@ -366,3 +383,4 @@ plt.legend()
 plt.pause(0.5)
 """
 plt.show()
+
