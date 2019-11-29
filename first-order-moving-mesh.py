@@ -112,18 +112,12 @@ class mesh:
 		self.Q = U * self.dx.reshape(-1,1)
 		
 	"""HLL Riemann Solver; note this also updates self.v, self.lp, and self.lm"""
-	def riemann_solver(self):#, Wl, Wr, vf):
+	def riemann_solver(self, WL, WR, vf):
 		fHLL = np.full((self.nx+1, 3), 0.)
 		
-		if self.mesh_type == "Lagrangian":
-			self.v = np.copy(self.W[:,1])
-			self.vf = (self.v[:-1] + self.v[1:])/2
-
-			
-		#	Transform lab-frame to face frame.	NB: Face frame may vary for every face => must compute WL, WR separately
-		WL, WR = np.copy(self.W)[:-1,:], np.copy(self.W)[1:,:]
-		WL[:,1] -= self.vf		# subtract face velocity from cell to LEFT of face
-		WR[:,1] -= self.vf		# subtract face velocity from cell to RIGHT of face
+		#	Transform lab-frame to face frame.
+		WL[:,1] -= vf		# subtract face velocity from cell to LEFT of face
+		WR[:,1] -= vf		# subtract face velocity from cell to RIGHT of face
 		UL = prim2cons(WL, self.gamma)
 		UR = prim2cons(WR, self.gamma)
 		fL = prim2flux(WL, self.gamma)
@@ -148,8 +142,8 @@ class mesh:
 		
 		#	Calculate net flux in frame of LAB
 		self.fF = np.copy(fHLL)
-		self.fF[:,1] += fHLL[:,0]*self.vf
-		self.fF[:,2] += 0.5*fHLL[:,0]*self.vf**2 + fHLL[:,1]*self.vf
+		self.fF[:,1] += fHLL[:,0]*vf
+		self.fF[:,2] += 0.5*fHLL[:,0]*vf**2 + fHLL[:,1]*vf
 		
 	
 	"""	Calculate time step duration according to Courant condition"""
@@ -211,20 +205,26 @@ class mesh:
 			# 2) Compute edge states
 			self.W = boundary(self.W, self.boundary)
 			
-			# 3) Compute fluxes
-			self.riemann_solver()
+			# 3) Compute face velocity
+			if self.mesh_type == "Lagrangian":
+				self.v = np.copy(self.W[:,1])
+				self.vf = (self.v[:-1] + self.v[1:])/2
+
+			# 4) Compute fluxes
+			WL, WR = np.copy(self.W)[:-1,:], np.copy(self.W)[1:,:]
+			self.riemann_solver(WL, WR, self.vf)
 			Uold = prim2cons(self.W, self.gamma) 
 			Qold = Uold * self.dx.reshape(-1,1)		#nb use old dx here to get old Q
 			Unew = np.copy(Uold) 
 			
-			# 4) Compute Courant condition
+			# 5) Compute Courant condition
 			dt = self.CFL_condition()
 			dt = min(self.tend-t, dt)
 			
-			# 5) Update mesh.
+			# 6) Update mesh.
 			self.update_mesh(dt)
 			
-			#	6) First order time integration using Euler's method
+			# 7) First order time integration using Euler's method
 			L = - np.diff(self.fF, axis=0)
 			Unew[1:-1] = (Qold[1:-1] + L*dt) / self.dx[1:-1].reshape(-1,1)
 			self.Q = Unew * self.dx.reshape(-1,1)	#nb use new dx here to get new Q
