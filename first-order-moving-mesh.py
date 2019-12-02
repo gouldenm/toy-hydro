@@ -66,6 +66,7 @@ class mesh:
 		self.vf = np.full(nx+1, fixed_v)							#velocity of cell faces -- defaults to same as cell centres
 		self.dx = np.full(nx+2, self.xend/(self.nx-1) ) 			#size of cell -- initially uniform across all cells
 		self.x = np.arange(0, nx+2)*(self.dx[0])					#position of cell centre
+		self.t = 0.0												#current time		
 		
 		#	Attributes that will be used later:
 		self.boundary, self.IC = None, None							#Boundary type, initial condition type
@@ -182,8 +183,8 @@ class mesh:
 		dtp = self.CFL * self.dx[1: ] / np.absolute(self.lp)
 		
 		#hopefully we can cut this out later, but...
-		st = 1/(self.K * self.W[:,0] * self.W[:,3])
-		dt = min(min(dtm), min(dtp), min(st))
+		#st = 1/(self.K * self.W[:,0] * self.W[:,3])
+		dt = min(min(dtm), min(dtp))#, min(st))
 		return(dt)
 	
 	
@@ -194,7 +195,6 @@ class mesh:
 		self.x += self.v * dt
 		self.dx[1:-1] = (self.x[2:] - self.x[:-2])*0.5
 		self.dx[0], self.dx[-1] = self.dx[1], self.dx[-2]
-		return 
 		
 		#  Check if any (non-ghost) cells exeed the spatial extent of the grid in + x direction
 		right_limit, left_limit = 0, 0
@@ -214,6 +214,7 @@ class mesh:
 		#  If any cells lie outside spatial extent in periodic regime, roll grid so they don't anymore
 		if self.boundary == "periodic":
 			if right_limit != 0:
+				#print("rolled left")
 				self.W[1:-1,:] = np.roll(self.W[1:-1,:], axis=0,shift = self.nx - right_limit)
 				self.W = boundary(self.W, self.boundary)	#correct ghost cells
 				self.x -= self.x[-2] - self.xend			#shift coordinates to match rolled grid
@@ -228,9 +229,8 @@ class mesh:
 	def solve(self):
 		print("\n\n")
 		plt.pause(0.1)
-		t = 0
 		plotcount = 1
-		while t < self.tend:
+		while self.t < self.tend:
 			# 1) Compute primitive
 			Uold = self.Q / self.dx.reshape(-1,1)
 			self.W = cons2prim(Uold, self.gamma)
@@ -251,27 +251,24 @@ class mesh:
 			
 			# 5) Compute Courant condition
 			dt = self.CFL_condition()
-			dt = min(self.tend-t, dt)
+			dt = min(self.tend-self.t, dt)
 			
 			# 6) Update mesh.
 			self.update_mesh(dt)
 			
 			# 7) First order time integration using Euler's method
 			L = - np.diff(fF, axis=0)
-			Unew[1:-1] = (Qold[1:-1] + L*dt) / self.dx[1:-1].reshape(-1,1)
+			Unew[1:-1,:4] = (Qold[1:-1,:4] + L[:,:4]*dt) / self.dx[1:-1].reshape(-1,1)
 			self.Q = Unew * self.dx.reshape(-1,1)	#nb use new dx here to get new Q
-			
-			# 8) And add the source term for the dust....
-			self.W = cons2prim(Unew, self.gamma)
-			S = -self.K*(self.Q[:,3]*Unew[:,4] - self.Q[:,0]*Unew[:,1])
-			self.Q[:,4] += S*dt
-
+			# must include source term for the dust
+			self.Q[1:-1,4] = (Qold[1:-1,4] + L[:,4]*dt + self.K*Uold[1:-1,3]*dt*self.Q[1:-1,1])/(1+self.K*Uold[1:-1,0]*dt)
+			#self.Q[1:-1, 4] = (Qold[1:-1,4]*(
 			
 			if plotcount % 20000 == 0:
 				break
 				print(t)
 				#plt.plot(self.x, self.W[:,0] , label="w="+str(self.v[0]) + ", t=" + str(t+dt))
-			t+=dt	
+			self.t+=dt	
 			plotcount+=1
 			
 	@property
@@ -287,22 +284,31 @@ class mesh:
 		return (self.W[:,2]/(gamma-1) + (self.W[:,0]*self.W[:,1]**2)/2)
 		
 		
-"""
-grid = mesh(700, 0.2, 1.0,  K=0)#,mesh_type="Lagrangian")
+t=0.3
+grid = mesh(500, t, 1.0,  K=0)#,mesh_type="Lagrangian")
 grid.setup(boundary = "flow", IC = "LRsplit", vLd=0.5, vRd=0.225)
 #plt.plot(grid.x, grid.W[:,0] ,label="Initial W[v]")
 grid.solve()
 #plt.plot(grid.x, grid.W[:,0] , label="Gas density L")
+plt.plot(grid.x, grid.W[:,0] , label="Gas density K=0" )
 plt.plot(grid.x, grid.W[:,3] , label="Dust density, K=0")
 plt.legend()
 plt.pause(0.5)
 
-
-grid = mesh(700, 0.2, 1.0, K=10)
+grid = mesh(500, t, 1.0, K=20)
 grid.setup(boundary = "flow", IC = "LRsplit", vLd=0.5, vRd=0.225)
 grid.solve()
-plt.plot(grid.x, grid.W[:,0] , label="Gas density" )
+plt.plot(grid.x, grid.W[:,0] , label="Gas density K=2" )
 plt.plot(grid.x, grid.W[:,3] , label="Dust density, K =2")
+plt.legend()
+plt.pause(0.5)
+
+"""
+grid = mesh(500, t, 1.0, K=20)
+grid.setup(boundary = "flow", IC = "LRsplit", vLd=0.5, vRd=0.225)
+grid.solve()
+plt.plot(grid.x, grid.W[:,0] , label="Gas density K=20" )
+plt.plot(grid.x, grid.W[:,3] , label="Dust density, K =20")
 plt.legend()
 plt.pause(0.5)
 
@@ -367,17 +373,80 @@ plt.plot(gridsound.x, gridsound.W[:,0], label="vB=1, w="+str(gridsound.v[0]))
 plt.legend()
 plt.pause(0.5)
 """
-
-t=50.
+"""
+plt.figure()
 
 #Relative motion = sound speed, should match initial conditions
-gridsound = mesh(500, t, 1.0, fixed_v = 1.0, K=100.0)
-gridsound.setup()
+gridsound = mesh(500, 0.05, 1.0, fixed_v = 1.0, K=100.0)
+gridsound.setup(drhod=0, l=1.0)
 gridsound.solve()
-plt.plot(gridsound.x, gridsound.W[:,0], label="vB=0, w="+str(gridsound.v[0]))
+plt.plot(gridsound.x, gridsound.W[:,0], label="Gas, w=c_s", color="k")
+plt.plot(gridsound.x, gridsound.W[:,3], label="dust t=0.05")
 plt.legend()
-plt.plot(gridsound.x, gridsound.W[:,3], label="dust")
+plt.pause(1.0)
+
+gridsound.tend = 0.1
+gridsound.solve()
+plt.plot(gridsound.x, gridsound.W[:,3], label="dust t=0.1")
+plt.legend()
+plt.pause(1.0)
+
+gridsound.tend = 0.3
+gridsound.solve()
+plt.plot(gridsound.x, gridsound.W[:,3], label="dust t=0.3")
+plt.legend()
+plt.pause(1.0)
+
+gridsound.tend = 0.5
+gridsound.solve()
+plt.plot(gridsound.x, gridsound.W[:,3], label="dust t=0.5")
+plt.legend()
+plt.pause(1.0)
+
+gridsound.tend = 0.75
+gridsound.solve()
+plt.plot(gridsound.x, gridsound.W[:,3], label="dust t=0.75s")
+plt.legend()
 plt.pause(0.5)
+
+gridsound.tend = 1.0
+gridsound.solve()
+plt.plot(gridsound.x, gridsound.W[:,3], label="dust t=1.0s")
+plt.legend()
+plt.pause(0.5)
+
+gridsound.tend = 1.5
+gridsound.solve()
+plt.plot(gridsound.x, gridsound.W[:,3], label="dust t=1.5")
+plt.legend()
+plt.pause(0.5)
+
+gridsound.tend = 2.0
+gridsound.solve()
+plt.plot(gridsound.x, gridsound.W[:,3], label="dust t=2.0")
+plt.legend()
+plt.pause(0.5)
+
+gridsound.tend = 5.0
+gridsound.solve()
+plt.plot(gridsound.x, gridsound.W[:,3], label="dust t=5.0")
+plt.legend()
+plt.pause(0.5)
+
+gridsound.tend = 10.0
+gridsound.solve()
+plt.plot(gridsound.x, gridsound.W[:,3], label="dust t=10.0")
+plt.legend()
+plt.pause(0.5)
+
+gridsound.tend = 15.0
+gridsound.solve()
+plt.plot(gridsound.x, gridsound.W[:,3], label="dust t=15.0")
+plt.legend()
+plt.pause(0.5)
+"""
+
+
 
 """
 gridsound = mesh(500, t, 1.0, fixed_v = 0)

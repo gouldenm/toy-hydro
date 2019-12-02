@@ -151,7 +151,7 @@ if __name__ == "__main__":
         return l1,l2,l3,l4
 
     ani = animation.FuncAnimation(f, animate, np.arange(0, N), 
-                                  interval=50, blit=True)
+                                  interval=100, repeat_delay=200, blit=True)
 
 
     plt.show()
