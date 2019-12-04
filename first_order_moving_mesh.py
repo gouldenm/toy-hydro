@@ -162,9 +162,9 @@ class mesh:
 		#	Calculate signal speed for dust
 		self.ld = (np.sqrt(WL[:,3])*WL[:,4] + np.sqrt(WR[:,3])*WR[:,4]) / (np.sqrt(WL[:,3]) + np.sqrt(WR[:,3]))
 		#	Calculate DUST flux in frame of face (note if vL < 0 < vR, then fHLL = 0.)
-		indexL = self.ld > 0
-		indexC = self.ld == 0
-		indexR = self.ld < 0
+		indexL = (self.ld > 0) #& (((WL[:,4] > 0) | (WR[:,4] < 0)))
+		indexC = (self.ld == 0)# & (((WL[:,4] > 0) | (WR[:,4] < 0)))
+		indexR = (self.ld < 0) #& (((WL[:,4] > 0) | (WR[:,4] < 0)))
 		fHLL[indexL,3:] = fL[indexL,3:]
 		fHLL[indexC,3:] = (fL[indexC,3:] + fR[indexC,3:])/2.
 		fHLL[indexR,3:] = fR[indexR,3:]
@@ -225,11 +225,13 @@ class mesh:
 	def solve(self, scheme):
 		print("\n\n")
 		plotcount = 1
+		##f, ax = plt.subplots(2,1)
 		while self.t < self.tend:
 			# 1) Compute primitive
 			Uold = self.Q / self.dx.reshape(-1,1)
 			self.W = cons2prim(Uold, self.gamma)
-			
+			"""ax[0].plot(gridsound.x, gridsound.W[:,3], "r-", label="Dust $\rho$")
+			ax[1].plot(gridsound.x, gridsound.W[:,4], "r-", label="Dust $v$")		"""	
 			# 2) Compute edge states
 			self.W = boundary(self.W, self.boundary)
 			
@@ -262,9 +264,10 @@ class mesh:
 				#self.Q[1:-1, 4] = (Qold[1:-1,4]*(
 			elif scheme == "exp":
 				self.Q[1:-1,4] = Qold[1:-1,4]*(np.exp(-self.K*Uold[1:-1,0]*dt)) \
-								 + (self.Q[1:-1,1])*(1-np.exp(self.K*Uold[1:-1,0]*dt))\
-								 + (L[:,4] - L[:,1])*(1-np.exp(self.K*Uold[1:-1,0]*dt))/(self.K*Uold[1:-1,0])
-			if plotcount % 300000 == 0:
+								 + Unew[1:-1,3]/Unew[1:-1,0] * self.Q[1:-1,1] * (1 - np.exp(-self.K*Unew[1:-1,0]*dt))\
+								 + (1-np.exp(-self.K*Unew[1:-1,0]*dt))/self.K * (L[:,4]/Unew[1:-1,0] - L[:,1]*Unew[1:-1,3]/Unew[1:-1,0]**2)\
+								 + Unew[1:-1,3]/Unew[1:-1,0]*L[:,1]*dt*np.exp(-self.K*Uold[1:-1,0]*dt)
+			if plotcount % 30000 == 0:
 				break
 				
 			self.t+=dt	
@@ -306,12 +309,12 @@ class mesh:
 
 
 
-
+"""
 #Relative motion = sound speed, should match initial conditions
-gridsound = mesh(200, 10.0, 1.0, mesh_type="Lagrangian", K=1.0)
-gridsound.setup(drhod=1e-4, drho=1e-4, vB=5, vBd=5, l=1.0)
+gridsound = mesh(600, 10., 1.0, K=10.0, mesh_type = "Lagrangian")
+gridsound.setup(drhod=1e-4, drho=1e-4, l=1.0)
 print(gridsound.x)
-gridsound.solve(scheme="exp")
+gridsound.solve(scheme="approx")
 f, ax = plt.subplots(2,1)
 ax[0].plot(gridsound.x, gridsound.W[:,0], "k-",  label="Gas $\rho$")
 ax[0].plot(gridsound.x, gridsound.W[:,3], "r-", label="Dust $\rho$")
@@ -321,4 +324,4 @@ ax[1].plot(gridsound.x, gridsound.W[:,4], "r-", label="Dust $v$")
 plt.legend()
 plt.pause(1.0)
 
-plt.show()
+plt.show()"""
