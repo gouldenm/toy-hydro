@@ -54,22 +54,23 @@ def boundary(q,boundary):
 
 class mesh:
 	def __init__(self, 					
-				 nx, tend, xend,					#number of (non-ghost) cells, simulation cutoff time, spatial extent of grid
+				 nx, xend,					#number of (non-ghost) cells, simulation cutoff time, spatial extent of grid
 				 mesh_type = "Fixed", fixed_v = 0,	#type of mesh movement (options = "Fixed" or "Lagrangian"), velocity of fixed grid
 				 K=0, ratio=1,						#constant in dust-gas coupling, dust:gast ratio
 				 CFL=0.5, gamma=1.4):
 		#	Establishing grid:
-		self.nx, self.tend, self.xend, self.CFL, self.gamma = nx, tend, xend, CFL, gamma
+		self.nx, self.xend, self.CFL, self.gamma = nx, xend, CFL, gamma
 		self.K, self.ratio = K, ratio								
 		self.mesh_type = mesh_type
 		self.v = np.full(nx+2, fixed_v)								#velocity of cell centres -- defaults to 0 for Eulerian mesh
 		self.vf = np.full(nx+1, fixed_v)							#velocity of cell faces -- defaults to same as cell centres
 		self.dx = np.full(nx+2, self.xend/(self.nx) ) 			#size of cell -- initially uniform across all cells
-		self.x = np.arange(-1, nx+1)*(self.dx[0])					#position of cell centre
+		self.x = (np.arange(-0.5, nx+1))*(self.dx[0])					#position of cell centre
 		self.t = 0.0												#current time		
 		
 		#	Attributes that will be used later:
 		self.boundary, self.IC = None, None							#Boundary type, initial condition type
+		self.tend = None
 		self.W = np.full((self.nx+2, 5), np.nan)					#primitive vector (lab frame)
 		self.Q = np.full((self.nx+2, 5), np.nan)					#Integrated conserved vector
 		self.lm = np.full(nx+1,np.nan)								#Left signal velocity	
@@ -162,12 +163,21 @@ class mesh:
 		#	Calculate signal speed for dust
 		self.ld = (np.sqrt(WL[:,3])*WL[:,4] + np.sqrt(WR[:,3])*WR[:,4]) / (np.sqrt(WL[:,3]) + np.sqrt(WR[:,3]))
 		#	Calculate DUST flux in frame of face (note if vL < 0 < vR, then fHLL = 0.)
-		indexL = (self.ld > 0) #& (((WL[:,4] > 0) | (WR[:,4] < 0)))
-		indexC = (self.ld == 0)# & (((WL[:,4] > 0) | (WR[:,4] < 0)))
-		indexR = (self.ld < 0) #& (((WL[:,4] > 0) | (WR[:,4] < 0)))
+		indexL = (self.ld > 1e-15) & np.logical_not(((WL[:,4] < 0) & (WR[:,4] > 0)))
+		indexC = (np.abs(self.ld) < 1e-15 ) & np.logical_not(((WL[:,4] < 0) & (WR[:,4] > 0)))
+		indexR = (self.ld < -1e-15) & np.logical_not(((WL[:,4] < 0) & (WR[:,4] > 0)))
 		fHLL[indexL,3:] = fL[indexL,3:]
 		fHLL[indexC,3:] = (fL[indexC,3:] + fR[indexC,3:])/2.
 		fHLL[indexR,3:] = fR[indexR,3:]
+		
+		w_f = self.ld.reshape(-1,1)
+		f_dust = w_f*np.where(w_f > 0, UL[:,3:], UR[:,3:]) 
+
+		#f_dust = fHLL[:,3:] 
+		
+		fHLL[:, 3:] = f_dust
+		
+		
 		#	Calculate net flux in frame of LAB
 		fF = np.copy(fHLL)
 		fF[:,1] += fHLL[:,0]*vf
@@ -191,6 +201,7 @@ class mesh:
 		self.x += self.v * dt
 		self.dx[1:-1] = (self.x[2:] - self.x[:-2])*0.5
 		self.dx[0], self.dx[-1] = self.dx[1], self.dx[-2]
+		
 		
 		#  Check if any (non-ghost) cells exeed the spatial extent of the grid in + x direction
 		right_limit, left_limit = 0, 0
@@ -222,25 +233,26 @@ class mesh:
 	
 	
 	"""	Function tying everything together into a hydro solver"""
-	def solve(self, scheme):
+	def solve(self, scheme, tend):
 		print("\n\n")
+		self.tend = tend
 		plotcount = 1
-		##f, ax = plt.subplots(2,1)
+		#f, ax = plt.subplots(2,1)
 		while self.t < self.tend:
 			# 1) Compute primitive
 			Uold = self.Q / self.dx.reshape(-1,1)
 			self.W = cons2prim(Uold, self.gamma)
-			"""ax[0].plot(gridsound.x, gridsound.W[:,3], "r-", label="Dust $\rho$")
-			ax[1].plot(gridsound.x, gridsound.W[:,4], "r-", label="Dust $v$")		"""	
 			# 2) Compute edge states
 			self.W = boundary(self.W, self.boundary)
-			
+			#print("\n", self.W[49:53,3:])
 			# 3) Compute face velocity
 			if self.mesh_type == "Lagrangian":
 				self.v = np.copy(self.W[:,1])
 				self.vf = (self.v[:-1] + self.v[1:])/2
 
 			# 4) Compute fluxes
+			#WL = 0.5*(self.W[:-1] + self.W[1:])
+			#WR  = WL.copy()
 			WL, WR = np.copy(self.W)[:-1,:], np.copy(self.W)[1:,:]
 			fF = self.riemann_solver(WL, WR, self.vf)
 			Qold = Uold * self.dx.reshape(-1,1)		#nb use old dx here to get old Q
@@ -267,7 +279,14 @@ class mesh:
 								 + Unew[1:-1,3]/Unew[1:-1,0] * self.Q[1:-1,1] * (1 - np.exp(-self.K*Unew[1:-1,0]*dt))\
 								 + (1-np.exp(-self.K*Unew[1:-1,0]*dt))/self.K * (L[:,4]/Unew[1:-1,0] - L[:,1]*Unew[1:-1,3]/Unew[1:-1,0]**2)\
 								 + Unew[1:-1,3]/Unew[1:-1,0]*L[:,1]*dt*np.exp(-self.K*Uold[1:-1,0]*dt)
-			if plotcount % 30000 == 0:
+			if plotcount % 200000 == 0:
+				ax[0].plot(gridsound.x, gridsound.W[:,3])
+				ax[0].grid()
+				ax[1].plot(gridsound.x, gridsound.W[:,4])
+				ax[0].scatter(gridsound.x, gridsound.W[:,3])
+				ax[1].scatter(gridsound.x, gridsound.W[:,4])
+				plt.pause(2)
+			if plotcount % 2000000== 0:
 				break
 				
 			self.t+=dt	
@@ -304,24 +323,3 @@ class mesh:
 	@property
 	def time(self):
 		return self.t
-		
-
-
-
-
-"""
-#Relative motion = sound speed, should match initial conditions
-gridsound = mesh(600, 10., 1.0, K=10.0, mesh_type = "Lagrangian")
-gridsound.setup(drhod=1e-4, drho=1e-4, l=1.0)
-print(gridsound.x)
-gridsound.solve(scheme="approx")
-f, ax = plt.subplots(2,1)
-ax[0].plot(gridsound.x, gridsound.W[:,0], "k-",  label="Gas $\rho$")
-ax[0].plot(gridsound.x, gridsound.W[:,3], "r-", label="Dust $\rho$")
-ax[1].plot(gridsound.x, gridsound.W[:,1], "k-",  label="Gas $v$")
-ax[1].plot(gridsound.x, gridsound.W[:,4], "r-", label="Dust $v$")
-
-plt.legend()
-plt.pause(1.0)
-
-plt.show()"""
