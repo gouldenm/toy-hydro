@@ -1,66 +1,34 @@
 """ A toy model for hydro simulations, used to test things before trying out Arepo.
 	Author: Maggie Celeste
 	Date: 07/11/2019
-	UPDATE: Added moving mesh as of 27/11/2019
+	Added moving mesh as of 27/11/2019
+	Added dust (with gas drag) as of 10/12/2019
 	
+	INSTRUCTIONS
 	To run a hydro sim:
 	1. Initialize a mesh instance
 	2. Run mesh.setup(), with whatever conditions you like
-	3. Run mesh.solve()
+	3. Run mesh.solve(), with scheme ("exp" or "approx") and tend (simulation end time -- float)
 """
 import numpy as np
 import matplotlib.pyplot as plt
 
-
-"""	Functions to convert from primitive vector to conserved vector and flux"""
-def prim2cons(W, gamma):
-	U = np.full((len(W), 5), np.nan)					#conserved state vector
-	U[:,0] = W[:,0]										#gas density
-	U[:,1] = W[:,0]*W[:,1]								#gas momentum
-	U[:,2] = W[:,2]/(gamma-1) + (W[:,0]*W[:,1]**2)/2	#gas energy
-	U[:,3] = W[:,3]										#dust density
-	U[:,4] = W[:,3]*W[:,4]								#dust momentum
-	return(U)
-
-def cons2prim(U, gamma):
-	W = np.full((len(U), 5), np.nan)					#primitive state vector
-	W[:,0] = U[:,0]										#gas density
-	W[:,1] = U[:,1]/U[:,0]								#gas velocity
-	W[:,2] = (gamma-1)*(U[:,2] - (U[:,1]**2/U[:,0])/2)	#gas pressure
-	W[:,3] = U[:,3]										#dust density
-	W[:,4] = U[:,4]/U[:,3]								#dust velocity
-	return(W)
-
-def prim2flux(W, gamma):
-	F = np.full((len(W), 5), np.nan)		#conserved state vector
-	F[:,0] = W[:,0]*W[:,1]													#gas mass flux
-	F[:,1] = W[:,0]*W[:,1]**2 + W[:,2]										#gas momentum flux
-	F[:,2] = W[:,1] * (W[:,2]/(gamma-1) + (W[:,0]*W[:,1]**2)/2 + W[:,2])	#gas energy flux
-	F[:,3] = W[:,3]*W[:,4]													#dust mass flux
-	F[:,4] = W[:,3]*W[:,4]**2												#dust momentum flux
-	return(F)
-
-
-"""	Function to impose boundary conditions onto primitive state vectors"""
-def boundary(q,boundary):
-   if boundary == "flow":
-       q[0,:] = q[1,:]
-       q[-1,:] = q[-2,:]
-   elif boundary == "periodic":
-       q[0,:] = q[-2,:]
-       q[-1,:] = q[1,:]
-   return(q)
-	
-
 class mesh:
 	def __init__(self, 					
-				 nx, xend,					#number of (non-ghost) cells, simulation cutoff time, spatial extent of grid
-				 mesh_type = "Fixed", fixed_v = 0,	#type of mesh movement (options = "Fixed" or "Lagrangian"), velocity of fixed grid
-				 K=0, ratio=1,						#constant in dust-gas coupling, dust:gast ratio
+				 nx, xend,								#number of (non-ghost) cells spatial extent of grid
+				 mesh_type = "Fixed", fixed_v = 0,		#type of mesh movement (options = "Fixed" or "Lagrangian"), velocity of fixed grid
+				 K=0,									#constant in dust-gas coupling, dust:gast ratio
 				 CFL=0.5, gamma=1.4):
+		#define indices
+		self.rho_g = 0
+		self.v_g = 1
+		self.P = 2
+		self.rho_d = 3
+		self.v_d = 4
+		
 		#	Establishing grid:
 		self.nx, self.xend, self.CFL, self.gamma = nx, xend, CFL, gamma
-		self.K, self.ratio = K, ratio								
+		self.K = K
 		self.mesh_type = mesh_type
 		self.v = np.full(nx+2, fixed_v)								#velocity of cell centres -- defaults to 0 for Eulerian mesh
 		self.vf = np.full(nx+1, fixed_v)							#velocity of cell faces -- defaults to same as cell centres
@@ -76,6 +44,47 @@ class mesh:
 		self.lm = np.full(nx+1,np.nan)								#Left signal velocity	
 		self.lp = np.full(nx+1,np.nan)								#Right signal velocity
 		self.ld = np.full(nx+1,np.nan)								#Dust signal velocity
+	
+	
+	"""	Functions to convert from primitive vector to conserved vector and flux"""
+	def prim2cons(self, W):
+		U = np.full((len(W), 5), np.nan)					#conserved state vector
+		U[:,0] = W[:,0]										#gas density
+		U[:,1] = W[:,0]*W[:,1]								#gas momentum
+		U[:,2] = W[:,2]/(self.gamma-1) + (W[:,0]*W[:,1]**2)/2	#gas energy
+		U[:,3] = W[:,3]										#dust density
+		U[:,4] = W[:,3]*W[:,4]								#dust momentum
+		return(U)
+	
+	def cons2prim(self, U):
+		W = np.full((len(U), 5), np.nan)					#primitive state vector
+		W[:,0] = U[:,0]										#gas density
+		W[:,1] = U[:,1]/U[:,0]								#gas velocity
+		W[:,2] = (self.gamma-1)*(U[:,2] - (U[:,1]**2/U[:,0])/2)	#gas pressure
+		W[:,3] = U[:,3]										#dust density
+		W[:,4] = U[:,4]/U[:,3]								#dust velocity
+		return(W)
+	
+	def prim2flux(self, W):
+		F = np.full((len(W), 5), np.nan)		#conserved state vector
+		F[:,0] = W[:,0]*W[:,1]													#gas mass flux
+		F[:,1] = W[:,0]*W[:,1]**2 + W[:,2]										#gas momentum flux
+		F[:,2] = W[:,1] * (W[:,2]/(self.gamma-1) + (W[:,0]*W[:,1]**2)/2 + W[:,2])	#gas energy flux
+		F[:,3] = W[:,3]*W[:,4]													#dust mass flux
+		F[:,4] = W[:,3]*W[:,4]**2												#dust momentum flux
+		return(F)
+	
+	
+	"""	Function to impose boundary conditions onto primitive state vectors"""
+	def boundary_set(self, q):
+		if self.boundary == "flow":
+			q[0,:] = q[1,:]
+			q[-1,:] = q[-2,:]
+		elif self.boundary == "periodic":
+			q[0,:] = q[-2,:]
+			q[-1,:] = q[1,:]
+		return(q)
+	
 	
 	"""		Generate primitive vectors from Riemann-style Left/Right split		"""
 	def get_W_LRsplit(self, cutoff, 				#cutoff tells where L/R boundary is
@@ -109,12 +118,6 @@ class mesh:
 			self.W[i,2] = C*self.W[i,0]**self.gamma
 			self.W[i,3] = rhoBd + drhod*np.sin(k*self.x[i])
 			self.W[i,4] = vBd + c_s* (drhod/rhoBd)*np.sin(k*self.x[i])
-			"""else:
-				self.W[i,0] = rhoB
-				self.W[i,1] = vB
-				self.W[i,2] = C*rhoB**self.gamma
-				self.W[i,3] = rhoBd
-				self.W[i,4] = vBd"""
 		
 	"""		Set up Primitive vectors		"""
 	def setup(self,
@@ -130,22 +133,22 @@ class mesh:
 			self.get_W_LRsplit(cutoff, rhoL, PL, vL, rhoR, PR, vR, rhoLd, vLd, rhoRd, vRd)
 			
 		# Compute conserved quantities.
-		U = prim2cons(self.W, self.gamma)
+		U = self.prim2cons(self.W)
 		self.Q = U * self.dx.reshape(-1,1)
 		
 	"""HLL Riemann Solver; note this also updates self.v, self.lp, and self.lm"""
-	def riemann_solver(self, WL, WR, vf):
+	def riemann_solver(self, WL_in, WR_in, vf):
 		fHLL = np.full((self.nx+1, 5), 0.)
-		
+		WL, WR = np.copy(WL_in), np.copy(WR_in)
 		#	Transform lab-frame to face frame.
 		WL[:,1] -= vf		# subtract face velocity from gas velocity
 		WR[:,1] -= vf		
 		WL[:,4] -= vf		# subtract face velocity from dust velocity
 		WR[:,4] -= vf
-		UL = prim2cons(WL, self.gamma)
-		UR = prim2cons(WR, self.gamma)
-		fL = prim2flux(WL, self.gamma)
-		fR = prim2flux(WR, self.gamma)
+		UL = self.prim2cons(WL)
+		UR = self.prim2cons(WR)
+		fL = self.prim2flux(WL)
+		fR = self.prim2flux(WR)
 		
 		#	Calculate signal speeds for gas
 		csl = np.sqrt(self.gamma*WL[:,2]/WL[:,0])
@@ -190,7 +193,7 @@ class mesh:
 	def CFL_condition(self):
 		dtm = self.CFL * self.dx[:-1] / np.absolute(self.lm)
 		dtp = self.CFL * self.dx[1: ] / np.absolute(self.lp)
-		dt = min(min(dtm), min(dtp))#, min(st))
+		dt = min(min(dtm), min(dtp))
 		return(dt)
 	
 	
@@ -223,28 +226,48 @@ class mesh:
 			if right_limit != 0:
 				#print("rolled left")
 				self.W[1:-1,:] = np.roll(self.W[1:-1,:], axis=0,shift = self.nx - right_limit)
-				self.W = boundary(self.W, self.boundary)	#correct ghost cells
+				self.W = self.boundary_set(self.W)	#correct ghost cells
 				self.x -= self.x[-2] - self.xend			#shift coordinates to match rolled grid
 			
 			elif left_limit != 0:
 				self.W[1:-1,:] = np.roll(self.W[1:-1,:], axis=0,shift = -left_limit)
-				self.W = boundary(self.W, self.boundary)
+				self.W = self.boundary_set(self.W)
 				self.x += (0 - self.x[1])
-	
-	
+		"""
+		elif self.boundary == "flow":
+			if right_limit != 0:
+				#Delete overhanging cells from right end by rolling + overwriting
+				overhang = self.nx - right_limit
+				self.W[1:-1,:] = np.roll(self.W[1:-1,:], axis=0,shift = overhang)
+				self.W[: overhang, :] = self.W[overhang:overhang*2,:]
+				self.W = self.boundary_set(self.W)	#correct ghost cells
+				self.x -= self.x[-2] - self.xend			#shift coordinates to match rolled grid
+			
+			elif left_limit != 0:
+				self.W[1:-1,:] = np.roll(self.W[1:-1,:], axis=0,shift = -left_limit)
+				self.W[-left_limit: -1, :] = self.W[-left_limit*2:-left_limit,:]
+				self.W = self.boundary_set(self.W)	#correct ghost cells
+				self.x -= self.x[-2] - self.xend			#shift coordinates to match rolled grid
+		"""
 	"""	Function tying everything together into a hydro solver"""
-	def solve(self, scheme, tend):
-		print("\n\n")
+	def solve(self, scheme, tend, early_stop = None, plotsep=None, timestep=None): #early_stop = steps til stop; plotsep = steps between plots
+		print("Solving... \n")
 		self.tend = tend
 		plotcount = 1
-		#f, ax = plt.subplots(2,1)
+		if plotsep is not None:
+			f, ax = plt.subplots(2,1)
+			ax[0].plot(self.x, self.W[:,3], color='k')
+			ax[1].plot(self.x, self.W[:,4], color='k')
+			ax[0].scatter(self.x, self.W[:,3], color='k')
+			ax[1].scatter(self.x, self.W[:,4], color='k')
 		while self.t < self.tend:
 			# 1) Compute primitive
 			Uold = self.Q / self.dx.reshape(-1,1)
-			self.W = cons2prim(Uold, self.gamma)
+			self.W = self.cons2prim(Uold)
+			
 			# 2) Compute edge states
-			self.W = boundary(self.W, self.boundary)
-			#print("\n", self.W[49:53,3:])
+			self.W = self.boundary_set(self.W)
+
 			# 3) Compute face velocity
 			if self.mesh_type == "Lagrangian":
 				self.v = np.copy(self.W[:,1])
@@ -259,8 +282,12 @@ class mesh:
 			Unew = np.copy(Uold) 
 			
 			# 5) Compute Courant condition
-			dt = self.CFL_condition()
-			dt = min(self.tend-self.t, dt)
+			if timestep is not None:
+				dt = timestep
+			
+			else:
+				dt = self.CFL_condition()
+				dt = min(self.tend-self.t, dt)
 			
 			# 6) Update mesh.
 			self.update_mesh(dt)
@@ -279,18 +306,24 @@ class mesh:
 								 + Unew[1:-1,3]/Unew[1:-1,0] * self.Q[1:-1,1] * (1 - np.exp(-self.K*Unew[1:-1,0]*dt))\
 								 + (1-np.exp(-self.K*Unew[1:-1,0]*dt))/self.K * (L[:,4]/Unew[1:-1,0] - L[:,1]*Unew[1:-1,3]/Unew[1:-1,0]**2)\
 								 + Unew[1:-1,3]/Unew[1:-1,0]*L[:,1]*dt*np.exp(-self.K*Uold[1:-1,0]*dt)
-			if plotcount % 200000 == 0:
-				ax[0].plot(gridsound.x, gridsound.W[:,3])
-				ax[0].grid()
-				ax[1].plot(gridsound.x, gridsound.W[:,4])
-				ax[0].scatter(gridsound.x, gridsound.W[:,3])
-				ax[1].scatter(gridsound.x, gridsound.W[:,4])
-				plt.pause(2)
-			if plotcount % 2000000== 0:
-				break
-				
+			if plotsep is not None:
+				if plotcount % plotsep == 0:
+					ax[0].plot(self.x, self.W[:,3])
+					ax[1].plot(self.x, self.W[:,4])
+					ax[0].scatter(self.x, self.W[:,3])
+					ax[1].scatter(self.x, self.W[:,4])
+					ax[0].grid()
+					plt.pause(0.5)
+					
+			if early_stop:
+				if early_stop == plotcount:
+					print("Stopped simulation early at time t=", self.t+dt)
+					break
+			
+			
 			self.t+=dt	
 			plotcount+=1
+			print(plotcount)
 			
 	@property
 	def position(self):
@@ -323,3 +356,10 @@ class mesh:
 	@property
 	def time(self):
 		return self.t
+
+"""
+eg = mesh(200, 1.0, mesh_type = "Lagrangian", K =1.0, CFL = 0.5)
+eg.setup(IC="soundwave", boundary="periodic", vB=0, rhoB=1.0, drho=1e-3, l=1.0, c_s=1.0)
+eg.solve(tend=1.0, scheme = "approx", plotsep=100, early_stop = 500)
+plt.show()
+"""
