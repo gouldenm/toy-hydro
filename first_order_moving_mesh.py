@@ -54,25 +54,25 @@ def boundary(q,boundary):
 
 class mesh:
 	def __init__(self, 					
-				 nx, tend, xend,					#number of (non-ghost) cells, simulation cutoff time, spatial extent of grid
+				 nx, xend,					#number of (non-ghost) cells, simulation cutoff time, spatial extent of grid
 				 mesh_type = "Fixed", fixed_v = 0,	#type of mesh movement (options = "Fixed" or "Lagrangian"), velocity of fixed grid
 				 K=0, ratio=1,						#constant in dust-gas coupling, dust:gast ratio
 				 CFL=0.5, gamma=1.4):
 		#	Establishing grid:
-		self.nx, self.tend, self.xend, self.CFL, self.gamma = nx, tend, xend, CFL, gamma
+		self.nx, self.xend, self.CFL, self.gamma = nx, xend, CFL, gamma
 		self.K, self.ratio = K, ratio								
 		self.mesh_type = mesh_type
 		self.v = np.full(nx+2, fixed_v)								#velocity of cell centres -- defaults to 0 for Eulerian mesh
 		self.vf = np.full(nx+1, fixed_v)							#velocity of cell faces -- defaults to same as cell centres
-		self.dx = np.full(nx+2, self.xend/(self.nx-1) ) 			#size of cell -- initially uniform across all cells
-		self.x = np.arange(0, nx+2)*(self.dx[0])					#position of cell centre
+		self.dx = np.full(nx+2, self.xend/(self.nx) ) 			#size of cell -- initially uniform across all cells
+		self.x = (np.arange(-0.5, nx+1))*(self.dx[0])					#position of cell centre
 		self.t = 0.0												#current time		
 		
 		#	Attributes that will be used later:
 		self.boundary, self.IC = None, None							#Boundary type, initial condition type
+		self.tend = None
 		self.W = np.full((self.nx+2, 5), np.nan)					#primitive vector (lab frame)
 		self.Q = np.full((self.nx+2, 5), np.nan)					#Integrated conserved vector
-		#self.fF = np.full((nx+1, 5), np.nan)						#Net flux across face (lab frame)
 		self.lm = np.full(nx+1,np.nan)								#Left signal velocity	
 		self.lp = np.full(nx+1,np.nan)								#Right signal velocity
 		self.ld = np.full(nx+1,np.nan)								#Dust signal velocity
@@ -103,18 +103,18 @@ class mesh:
 		C = c_s**2*rhoB**(1-self.gamma)/(self.gamma)  	#P = C*rho^gamma
 		k = 2*np.pi/l
 		for i in range(0, self.nx+2):
-			if self.x[i] <= l:
-				self.W[i,0] = rhoB + drho*np.sin(k*self.x[i])
-				self.W[i,1] = vB + c_s* (drho/rhoB)*np.sin(k*self.x[i])
-				self.W[i,2] = C*self.W[i,0]**self.gamma
-				self.W[i,3] = rhoBd + drhod*np.sin(k*self.x[i])
-				self.W[i,4] = vBd + c_s* (drhod/rhoBd)*np.sin(k*self.x[i])
-			else:
+			#if self.x[i] <= l:
+			self.W[i,0] = rhoB + drho*np.sin(k*self.x[i])
+			self.W[i,1] = vB + c_s* (drho/rhoB)*np.sin(k*self.x[i])
+			self.W[i,2] = C*self.W[i,0]**self.gamma
+			self.W[i,3] = rhoBd + drhod*np.sin(k*self.x[i])
+			self.W[i,4] = vBd + c_s* (drhod/rhoBd)*np.sin(k*self.x[i])
+			"""else:
 				self.W[i,0] = rhoB
 				self.W[i,1] = vB
 				self.W[i,2] = C*rhoB**self.gamma
 				self.W[i,3] = rhoBd
-				self.W[i,4] = vBd
+				self.W[i,4] = vBd"""
 		
 	"""		Set up Primitive vectors		"""
 	def setup(self,
@@ -152,8 +152,6 @@ class mesh:
 		csr = np.sqrt(self.gamma*WR[:,2]/WR[:,0])
 		self.lm = WL[:,1] - csl
 		self.lp = WR[:,1] + csr
-		#	Calculate signal speed for dust
-		self.ld = (np.sqrt(WL[:,3])*WL[:,4] + np.sqrt(WR[:,3])*WR[:,4]) / (np.sqrt(WL[:,3]) + np.sqrt(WR[:,3]))
 		#	Calculate GAS flux in frame of face
 		indexL = self.lm >= 0
 		indexR = self.lp <= 0
@@ -162,13 +160,24 @@ class mesh:
 		fHLL[indexL,:3] = fL[indexL,:3]
 		fHLL[indexR,:3] = fR[indexR,:3]
 		
+		#	Calculate signal speed for dust
+		self.ld = (np.sqrt(WL[:,3])*WL[:,4] + np.sqrt(WR[:,3])*WR[:,4]) / (np.sqrt(WL[:,3]) + np.sqrt(WR[:,3]))
 		#	Calculate DUST flux in frame of face (note if vL < 0 < vR, then fHLL = 0.)
-		indexL = self.ld > 0
-		indexC = self.ld == 0
-		indexR = self.ld < 0
+		indexL = (self.ld > 1e-15) & np.logical_not(((WL[:,4] < 0) & (WR[:,4] > 0)))
+		indexC = (np.abs(self.ld) < 1e-15 ) & np.logical_not(((WL[:,4] < 0) & (WR[:,4] > 0)))
+		indexR = (self.ld < -1e-15) & np.logical_not(((WL[:,4] < 0) & (WR[:,4] > 0)))
 		fHLL[indexL,3:] = fL[indexL,3:]
 		fHLL[indexC,3:] = (fL[indexC,3:] + fR[indexC,3:])/2.
 		fHLL[indexR,3:] = fR[indexR,3:]
+		
+		w_f = self.ld.reshape(-1,1)
+		f_dust = w_f*np.where(w_f > 0, UL[:,3:], UR[:,3:]) 
+
+		#f_dust = fHLL[:,3:] 
+		
+		fHLL[:, 3:] = f_dust
+		
+		
 		#	Calculate net flux in frame of LAB
 		fF = np.copy(fHLL)
 		fF[:,1] += fHLL[:,0]*vf
@@ -181,9 +190,6 @@ class mesh:
 	def CFL_condition(self):
 		dtm = self.CFL * self.dx[:-1] / np.absolute(self.lm)
 		dtp = self.CFL * self.dx[1: ] / np.absolute(self.lp)
-		
-		#hopefully we can cut this out later, but...
-		#st = 1/(self.K * self.W[:,0] * self.W[:,3])
 		dt = min(min(dtm), min(dtp))#, min(st))
 		return(dt)
 	
@@ -195,6 +201,7 @@ class mesh:
 		self.x += self.v * dt
 		self.dx[1:-1] = (self.x[2:] - self.x[:-2])*0.5
 		self.dx[0], self.dx[-1] = self.dx[1], self.dx[-2]
+		
 		
 		#  Check if any (non-ghost) cells exeed the spatial extent of the grid in + x direction
 		right_limit, left_limit = 0, 0
@@ -226,24 +233,26 @@ class mesh:
 	
 	
 	"""	Function tying everything together into a hydro solver"""
-	def solve(self):
+	def solve(self, scheme, tend):
 		print("\n\n")
-		plt.pause(0.1)
+		self.tend = tend
 		plotcount = 1
+		#f, ax = plt.subplots(2,1)
 		while self.t < self.tend:
 			# 1) Compute primitive
 			Uold = self.Q / self.dx.reshape(-1,1)
 			self.W = cons2prim(Uold, self.gamma)
-		
 			# 2) Compute edge states
 			self.W = boundary(self.W, self.boundary)
-			
+			#print("\n", self.W[49:53,3:])
 			# 3) Compute face velocity
 			if self.mesh_type == "Lagrangian":
 				self.v = np.copy(self.W[:,1])
 				self.vf = (self.v[:-1] + self.v[1:])/2
 
 			# 4) Compute fluxes
+			#WL = 0.5*(self.W[:-1] + self.W[1:])
+			#WR  = WL.copy()
 			WL, WR = np.copy(self.W)[:-1,:], np.copy(self.W)[1:,:]
 			fF = self.riemann_solver(WL, WR, self.vf)
 			Qold = Uold * self.dx.reshape(-1,1)		#nb use old dx here to get old Q
@@ -260,238 +269,57 @@ class mesh:
 			L = - np.diff(fF, axis=0)
 			Unew[1:-1,:4] = (Qold[1:-1,:4] + L[:,:4]*dt) / self.dx[1:-1].reshape(-1,1)
 			self.Q = Unew * self.dx.reshape(-1,1)	#nb use new dx here to get new Q
-			# must include source term for the dust
-			self.Q[1:-1,4] = (Qold[1:-1,4] + L[:,4]*dt + self.K*Uold[1:-1,3]*dt*self.Q[1:-1,1])/(1+self.K*Uold[1:-1,0]*dt)
-			#self.Q[1:-1, 4] = (Qold[1:-1,4]*(
-			
-			if plotcount % 20000 == 0:
+			if scheme == "approx":
+				# must include source term for the dust
+				self.Q[1:-1,4] = (Qold[1:-1,4] + L[:,4]*dt + self.K*Uold[1:-1,3]*dt*self.Q[1:-1,1])\
+								/ (1+self.K*Uold[1:-1,0]*dt)
+				#self.Q[1:-1, 4] = (Qold[1:-1,4]*(
+			elif scheme == "exp":
+				self.Q[1:-1,4] = Qold[1:-1,4]*(np.exp(-self.K*Uold[1:-1,0]*dt)) \
+								 + Unew[1:-1,3]/Unew[1:-1,0] * self.Q[1:-1,1] * (1 - np.exp(-self.K*Unew[1:-1,0]*dt))\
+								 + (1-np.exp(-self.K*Unew[1:-1,0]*dt))/self.K * (L[:,4]/Unew[1:-1,0] - L[:,1]*Unew[1:-1,3]/Unew[1:-1,0]**2)\
+								 + Unew[1:-1,3]/Unew[1:-1,0]*L[:,1]*dt*np.exp(-self.K*Uold[1:-1,0]*dt)
+			if plotcount % 200000 == 0:
+				ax[0].plot(gridsound.x, gridsound.W[:,3])
+				ax[0].grid()
+				ax[1].plot(gridsound.x, gridsound.W[:,4])
+				ax[0].scatter(gridsound.x, gridsound.W[:,3])
+				ax[1].scatter(gridsound.x, gridsound.W[:,4])
+				plt.pause(2)
+			if plotcount % 2000000== 0:
 				break
-				print(t)
-				#plt.plot(self.x, self.W[:,0] , label="w="+str(self.v[0]) + ", t=" + str(t+dt))
+				
 			self.t+=dt	
 			plotcount+=1
 			
 	@property
-	def pressure(self):
-		return (self.W[:,2])
+	def position(self):
+		return(self.x[1:-1])
 	
 	@property
-	def density(self):
-		return (self.W[:,0])
+	def pressure(self):
+		return (self.W[1:-1,2])
+	
+	@property
+	def rho_gas(self):
+		return (self.W[1:-1,0])
+	
+	@property
+	def rho_dust(self):
+		return (self.W[1:-1,3])
+	
+	@property
+	def v_gas (self):
+		return (self.W[1:-1,1])
+	
+	@property
+	def v_dust (self):
+		return (self.W[1:-1,4])
 	
 	@property
 	def energy(self):
-		return (self.W[:,2]/(gamma-1) + (self.W[:,0]*self.W[:,1]**2)/2)
-		
-		
-gridsound = mesh(500, 10., 1.0, K=1.0)#, mesh_type = "Lagrangian")
-gridsound.setup(drhod=1e-3, drho=1e-3, l=1.0)
-print(gridsound.x)
-gridsound.solve()
-f, ax = plt.subplots(2,1)
-ax[0].plot(gridsound.x, gridsound.W[:,0], "k-",  label="Gas $\rho$")
-ax[0].plot(gridsound.x, gridsound.W[:,3], "r-", label="Dust $\rho$")
-ax[1].plot(gridsound.x, gridsound.W[:,1], "k-",  label="Gas $v$")
-ax[1].plot(gridsound.x, gridsound.W[:,4], "r-", label="Dust $v$")
-"""
-grid = mesh(500, t, 1.0, K=20)
-grid.setup(boundary = "flow", IC = "LRsplit", vLd=0.5, vRd=0.225)
-grid.solve()
-plt.plot(grid.x, grid.W[:,0] , label="Gas density K=20" )
-plt.plot(grid.x, grid.W[:,3] , label="Dust density, K =20")
-plt.legend()
-plt.pause(0.5)
-
-
-
-
-grid = mesh(250, 0.2, 1.0,  fixed_v = 2.0)
-grid.setup(boundary = "flow", IC = "LRsplit", vL = 2, vR = 2)
-grid.solve()
-plt.plot(grid.x-0.4, grid.W[:,0] , label="w="+str(grid.v[0]) )
-plt.legend()
-plt.pause(0.5)
-
-
-
-grid = mesh(500, 0.2, 2.0,  fixed_v = -1)
-grid.setup(boundary = "flow", IC = "LRsplit",cutoff=0.25)
-grid.solve()
-plt.plot(grid.x, grid.W[:,0] , label="w="+str(grid.v[0]) )
-plt.legend()
-plt.pause(0.5)
-
-
-plt.xlabel("Position")
-plt.ylabel("Pressure")
-plt.pause(0.5)
-
-
-
-t=0.2
-
-plt.figure()
-
-gridsound = mesh(1000,t, 1.0, mesh_type="Lagrangian")
-gridsound.setup(vB=-1)
-gridsound.solve()
-plt.plot(gridsound.x, gridsound.W[:,0], label="Lagrangian")
-plt.legend()
-plt.pause(0.5)
-
-gridsound = mesh(1000,t, 1.0, mesh_type="Fixed")
-gridsound.setup(vB=-1)
-gridsound.solve()
-plt.plot(gridsound.x, gridsound.W[:,0], label="Eulerian")
-plt.legend()
-plt.pause(0.5)
-
-
-#Relative motion = 0, should be identical
-plt.figure()
-gridsound = mesh(1000, t, 1.0, fixed_v = 0)
-gridsound.setup(vB=0)
-gridsound.solve()
-plt.plot(gridsound.x, gridsound.W[:,0], label="vB=0, w="+str(gridsound.v[0]))
-plt.legend()
-plt.pause(0.5)
-
-gridsound = mesh(500, t, 1.0, fixed_v = 1)
-gridsound.setup(vB=1)
-gridsound.solve()
-plt.plot(gridsound.x, gridsound.W[:,0], label="vB=1, w="+str(gridsound.v[0]))
-plt.legend()
-plt.pause(0.5)
-"""
-"""
-plt.figure()
-
-#Relative motion = sound speed, should match initial conditions
-gridsound = mesh(500, 0.05, 1.0, fixed_v = 1.0, K=100.0)
-gridsound.setup(drhod=0, l=1.0)
-gridsound.solve()
-plt.plot(gridsound.x, gridsound.W[:,0], label="Gas, w=c_s", color="k")
-plt.plot(gridsound.x, gridsound.W[:,3], label="dust t=0.05")
-plt.legend()
-plt.pause(1.0)
-
-gridsound.tend = 0.1
-gridsound.solve()
-plt.plot(gridsound.x, gridsound.W[:,3], label="dust t=0.1")
-plt.legend()
-plt.pause(1.0)
-
-gridsound.tend = 0.3
-gridsound.solve()
-plt.plot(gridsound.x, gridsound.W[:,3], label="dust t=0.3")
-plt.legend()
-plt.pause(1.0)
-
-gridsound.tend = 0.5
-gridsound.solve()
-plt.plot(gridsound.x, gridsound.W[:,3], label="dust t=0.5")
-plt.legend()
-plt.pause(1.0)
-
-gridsound.tend = 0.75
-gridsound.solve()
-plt.plot(gridsound.x, gridsound.W[:,3], label="dust t=0.75s")
-plt.legend()
-plt.pause(0.5)
-
-gridsound.tend = 1.0
-gridsound.solve()
-plt.plot(gridsound.x, gridsound.W[:,3], label="dust t=1.0s")
-plt.legend()
-plt.pause(0.5)
-
-gridsound.tend = 1.5
-gridsound.solve()
-plt.plot(gridsound.x, gridsound.W[:,3], label="dust t=1.5")
-plt.legend()
-plt.pause(0.5)
-
-gridsound.tend = 2.0
-gridsound.solve()
-plt.plot(gridsound.x, gridsound.W[:,3], label="dust t=2.0")
-plt.legend()
-plt.pause(0.5)
-
-gridsound.tend = 5.0
-gridsound.solve()
-plt.plot(gridsound.x, gridsound.W[:,3], label="dust t=5.0")
-plt.legend()
-plt.pause(0.5)
-
-gridsound.tend = 10.0
-gridsound.solve()
-plt.plot(gridsound.x, gridsound.W[:,3], label="dust t=10.0")
-plt.legend()
-plt.pause(0.5)
-
-gridsound.tend = 15.0
-gridsound.solve()
-plt.plot(gridsound.x, gridsound.W[:,3], label="dust t=15.0")
-plt.legend()
-plt.pause(0.5)
-"""
-
-
-
-"""
-gridsound = mesh(500, t, 1.0, fixed_v = 0)
-gridsound.setup(vB=-1)
-gridsound.solve()
-plt.plot(gridsound.x, gridsound.W[:,0], label="vB=-1, w="+str(gridsound.v[0]))
-plt.legend()
-plt.pause(0.5)
-
-#Random faster speed for comparison
-gridsound = mesh(500, t, 1.0, fixed_v = 2.0)
-gridsound.setup()
-gridsound.solve()
-plt.plot(gridsound.x, gridsound.W[:,0], label="w="+str(gridsound.v[0]))
-plt.legend()
-plt.pause(0.5)
-
-
-
-plt.figure()
-
-gridsound = mesh(2000, 1.0, 1.0, fixed_v = 0.0)
-gridsound.setup()
-gridsound.solve()
-plt.plot(gridsound.x, gridsound.W[:,2], label="w="+str(gridsound.v[0]))
-plt.legend()
-plt.pause(0.5)
-
-gridsound = mesh(2000, 1.0, 1.0, fixed_v = 1.0)
-gridsound.setup(vB=1.0)
-gridsound.solve()
-plt.plot(gridsound.x, gridsound.W[:,2], label="w="+str(gridsound.v[0]))
-plt.legend()
-plt.pause(0.5)
-
-gridsound = mesh(2000, 1.0, 1.0, fixed_v = 1.0)
-gridsound.setup()
-gridsound.solve()
-plt.plot(gridsound.x, gridsound.W[:,2], label="w="+str(gridsound.v[0]))
-plt.legend()
-plt.pause(0.5)
-
-gridsound = mesh(2000, 1.0, 1.0, fixed_v = 2.0)
-gridsound.setup()
-gridsound.solve()
-plt.plot(gridsound.x, gridsound.W[:,2], label="w="+str(gridsound.v[0]))
-plt.legend()
-plt.pause(0.5)
-
-gridsound = mesh(2000, 1.0, 1.0, fixed_v = 2.0)
-gridsound.setup()
-gridsound.solve()
-plt.plot(gridsound.x, gridsound.W[:,2], label="w="+str(gridsound.v[0]))
-plt.legend()
-plt.pause(0.5)
-"""
-plt.show()
-
+		return (self.W[1:-1,2]/(gamma-1) + (self.W[1:-1,0]*self.W[1:-1,1]**2)/2)
+	
+	@property
+	def time(self):
+		return self.t

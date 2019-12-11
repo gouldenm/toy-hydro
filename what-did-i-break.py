@@ -103,18 +103,18 @@ class mesh:
 		C = c_s**2*rhoB**(1-self.gamma)/(self.gamma)  	#P = C*rho^gamma
 		k = 2*np.pi/l
 		for i in range(0, self.nx+2):
-			if self.x[i] <= l:
-				self.W[i,0] = rhoB + drho*np.sin(k*self.x[i])
-				self.W[i,1] = vB + c_s* (drho/rhoB)*np.sin(k*self.x[i])
-				self.W[i,2] = C*self.W[i,0]**self.gamma
-				self.W[i,3] = rhoBd + drhod*np.sin(k*self.x[i])
-				self.W[i,4] = vBd + c_s* (drhod/rhoBd)*np.sin(k*self.x[i])
-			else:
-				self.W[i,0] = rhoB
-				self.W[i,1] = vB
-				self.W[i,2] = C*rhoB**self.gamma
-				self.W[i,3] = rhoBd
-				self.W[i,4] = vBd
+			#if self.x[i] <= l:
+			self.W[i,0] = rhoB + drho*np.sin(k*self.x[i])
+			self.W[i,1] = vB + c_s* (drho/rhoB)*np.sin(k*self.x[i])
+			self.W[i,2] = C*self.W[i,0]**self.gamma
+			self.W[i,3] = rhoBd + drhod*np.sin(k*self.x[i])
+			self.W[i,4] = vBd + c_s* (drhod/rhoBd)*np.sin(k*self.x[i])
+			#else:
+			#	self.W[i,0] = rhoB
+			#	self.W[i,1] = vB
+			#	self.W[i,2] = C*rhoB**self.gamma
+			#	self.W[i,3] = rhoBd
+			#	self.W[i,4] = vBd
 		
 	"""		Set up Primitive vectors		"""
 	def setup(self,
@@ -284,16 +284,26 @@ class mesh:
 		return (self.W[:,2]/(gamma-1) + (self.W[:,0]*self.W[:,1]**2)/2)
 		
 		
-gridsound = mesh(500, 10., 1.0, K=1.0)#, mesh_type = "Lagrangian")
-gridsound.setup(drhod=1e-3, drho=1e-3, l=1.0)
-print(gridsound.x)
-gridsound.solve()
-f, ax = plt.subplots(2,1)
-ax[0].plot(gridsound.x, gridsound.W[:,0], "k-",  label="Gas $\rho$")
-ax[0].plot(gridsound.x, gridsound.W[:,3], "r-", label="Dust $\rho$")
-ax[1].plot(gridsound.x, gridsound.W[:,1], "k-",  label="Gas $v$")
-ax[1].plot(gridsound.x, gridsound.W[:,4], "r-", label="Dust $v$")
-"""
+"""t=0.3
+grid = mesh(500, t, 1.0,  K=0)#,mesh_type="Lagrangian")
+grid.setup(boundary = "flow", IC = "LRsplit", vLd=0.5, vRd=0.225)
+#plt.plot(grid.x, grid.W[:,0] ,label="Initial W[v]")
+grid.solve()
+#plt.plot(grid.x, grid.W[:,0] , label="Gas density L")
+plt.plot(grid.x, grid.W[:,0] , label="Gas density K=0" )
+plt.plot(grid.x, grid.W[:,3] , label="Dust density, K=0")
+plt.legend()
+plt.pause(0.5)
+
+grid = mesh(500, t, 1.0, K=20)
+grid.setup(boundary = "flow", IC = "LRsplit", vLd=0.5, vRd=0.225)
+grid.solve()
+plt.plot(grid.x, grid.W[:,0] , label="Gas density K=2" )
+plt.plot(grid.x, grid.W[:,3] , label="Dust density, K =2")
+plt.legend()
+plt.pause(0.5)
+
+
 grid = mesh(500, t, 1.0, K=20)
 grid.setup(boundary = "flow", IC = "LRsplit", vLd=0.5, vRd=0.225)
 grid.solve()
@@ -328,44 +338,28 @@ plt.pause(0.5)
 
 
 
-t=0.2
-
-plt.figure()
-
-gridsound = mesh(1000,t, 1.0, mesh_type="Lagrangian")
-gridsound.setup(vB=-1)
-gridsound.solve()
-plt.plot(gridsound.x, gridsound.W[:,0], label="Lagrangian")
-plt.legend()
-plt.pause(0.5)
-
-gridsound = mesh(1000,t, 1.0, mesh_type="Fixed")
-gridsound.setup(vB=-1)
-gridsound.solve()
-plt.plot(gridsound.x, gridsound.W[:,0], label="Eulerian")
-plt.legend()
-plt.pause(0.5)
-
-
-#Relative motion = 0, should be identical
-plt.figure()
-gridsound = mesh(1000, t, 1.0, fixed_v = 0)
-gridsound.setup(vB=0)
-gridsound.solve()
-plt.plot(gridsound.x, gridsound.W[:,0], label="vB=0, w="+str(gridsound.v[0]))
-plt.legend()
-plt.pause(0.5)
-
-gridsound = mesh(500, t, 1.0, fixed_v = 1)
-gridsound.setup(vB=1)
-gridsound.solve()
-plt.plot(gridsound.x, gridsound.W[:,0], label="vB=1, w="+str(gridsound.v[0]))
-plt.legend()
-plt.pause(0.5)
+#
+#Relative motion = sound speed, should match initial conditions
 """
-"""
-plt.figure()
+gridsound = mesh(300, 10.0, 1.0, mesh_type="Lagrangian", K=1.0)
+gridsound.setup(drhod=1e-4, drho=1e-4, vB=0, vBd=0, l=1.0)
+gridsound.solve()
+f, ax = plt.subplots(2,1)
+ax[0].plot(gridsound.x, gridsound.W[:,0], "k-",  label="Gas $\rho$")
+ax[0].plot(gridsound.x, gridsound.W[:,3], "r-", label="Dust $\rho$")
+ax[1].plot(gridsound.x, gridsound.W[:,1], "k-",  label="Gas $v$")
+ax[1].plot(gridsound.x, gridsound.W[:,4], "r-", label="Dust $v$")
 
+
+gridsound = mesh(300, 10.0, 1.0, mesh_type="Lagrangian", K=1.0)
+gridsound.setup(drhod=1e-4, drho=1e-4, vB=0, vBd=0, l=1.0)
+gridsound.solve()
+plt.figure()
+plt.plot(gridsound.x, gridsound.W[:,0], label="Gas, w=c_s", color="k")
+plt.plot(gridsound.x, gridsound.W[:,3], label="dust t=0.05")
+plt.show()
+
+"""
 #Relative motion = sound speed, should match initial conditions
 gridsound = mesh(500, 0.05, 1.0, fixed_v = 1.0, K=100.0)
 gridsound.setup(drhod=0, l=1.0)
@@ -493,5 +487,5 @@ plt.plot(gridsound.x, gridsound.W[:,2], label="w="+str(gridsound.v[0]))
 plt.legend()
 plt.pause(0.5)
 """
-plt.show()
+#plt.show()
 

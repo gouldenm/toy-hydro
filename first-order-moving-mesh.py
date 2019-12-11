@@ -284,15 +284,25 @@ class mesh:
 		return (self.W[:,2]/(gamma-1) + (self.W[:,0]*self.W[:,1]**2)/2)
 		
 		
-gridsound = mesh(500, 10., 1.0, K=1.0)#, mesh_type = "Lagrangian")
-gridsound.setup(drhod=1e-3, drho=1e-3, l=1.0)
-print(gridsound.x)
-gridsound.solve()
-f, ax = plt.subplots(2,1)
-ax[0].plot(gridsound.x, gridsound.W[:,0], "k-",  label="Gas $\rho$")
-ax[0].plot(gridsound.x, gridsound.W[:,3], "r-", label="Dust $\rho$")
-ax[1].plot(gridsound.x, gridsound.W[:,1], "k-",  label="Gas $v$")
-ax[1].plot(gridsound.x, gridsound.W[:,4], "r-", label="Dust $v$")
+t=0.3
+grid = mesh(500, t, 1.0,  K=0)#,mesh_type="Lagrangian")
+grid.setup(boundary = "flow", IC = "LRsplit", vLd=0.5, vRd=0.225)
+#plt.plot(grid.x, grid.W[:,0] ,label="Initial W[v]")
+grid.solve()
+#plt.plot(grid.x, grid.W[:,0] , label="Gas density L")
+plt.plot(grid.x, grid.W[:,0] , label="Gas density K=0" )
+plt.plot(grid.x, grid.W[:,3] , label="Dust density, K=0")
+plt.legend()
+plt.pause(0.5)
+
+grid = mesh(500, t, 1.0, K=20)
+grid.setup(boundary = "flow", IC = "LRsplit", vLd=0.5, vRd=0.225)
+grid.solve()
+plt.plot(grid.x, grid.W[:,0] , label="Gas density K=2" )
+plt.plot(grid.x, grid.W[:,3] , label="Dust density, K =2")
+plt.legend()
+plt.pause(0.5)
+
 """
 grid = mesh(500, t, 1.0, K=20)
 grid.setup(boundary = "flow", IC = "LRsplit", vLd=0.5, vRd=0.225)
