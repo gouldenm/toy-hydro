@@ -249,8 +249,14 @@ class mesh:
 				self.W = self.boundary_set(self.W)	#correct ghost cells
 				self.x -= self.x[-2] - self.xend			#shift coordinates to match rolled grid
 		"""
+	
+	
+	
+	
 	"""	Function tying everything together into a hydro solver"""
-	def solve(self, scheme, tend, early_stop = None, plotsep=None, timestep=None): #early_stop = steps til stop; plotsep = steps between plots
+	def solve(self, scheme, tend, 
+		      early_stop = None, plotsep=None, timestep=None,   #early_stop = steps til stop; plotsep = steps between plots
+		      feedback=True): 
 		print("Solving... \n")
 		self.tend = tend
 		plotcount = 1
@@ -260,28 +266,22 @@ class mesh:
 			ax[1].plot(self.x, self.W[:,4], color='k')
 			ax[0].scatter(self.x, self.W[:,3], color='k')
 			ax[1].scatter(self.x, self.W[:,4], color='k')
+		
 		while self.t < self.tend:
-			# 1) Compute primitive
-			Uold = self.Q / self.dx.reshape(-1,1)
-			self.W = self.cons2prim(Uold)
-			
-			# 2) Compute edge states
-			self.W = self.boundary_set(self.W)
-
-			# 3) Compute face velocity
+			# 1) Compute face velocity
 			if self.mesh_type == "Lagrangian":
 				self.v = np.copy(self.W[:,1])
 				self.vf = (self.v[:-1] + self.v[1:])/2
 
-			# 4) Compute fluxes
+			# 2) Compute fluxes
 			#WL = 0.5*(self.W[:-1] + self.W[1:])
 			#WR  = WL.copy()
 			WL, WR = np.copy(self.W)[:-1,:], np.copy(self.W)[1:,:]
 			fF = self.riemann_solver(WL, WR, self.vf)
-			Qold = Uold * self.dx.reshape(-1,1)		#nb use old dx here to get old Q
-			Unew = np.copy(Uold) 
+			Qold = np.copy(self.Q)		#nb use old dx here to get old Q
+			Unew = np.full_like(Qold, np.nan) 
 			
-			# 5) Compute Courant condition
+			# 3) Compute Courant condition
 			if timestep is not None:
 				dt = timestep
 			
@@ -289,23 +289,32 @@ class mesh:
 				dt = self.CFL_condition()
 				dt = min(self.tend-self.t, dt)
 			
-			# 6) Update mesh.
+			# 4) Update mesh.
 			self.update_mesh(dt)
 			
-			# 7) First order time integration using Euler's method
+			# 5) First order time integration using Euler's method
 			L = - np.diff(fF, axis=0)
 			Unew[1:-1,:4] = (Qold[1:-1,:4] + L[:,:4]*dt) / self.dx[1:-1].reshape(-1,1)
 			self.Q = Unew * self.dx.reshape(-1,1)	#nb use new dx here to get new Q
 			if scheme == "approx":
 				# must include source term for the dust
-				self.Q[1:-1,4] = (Qold[1:-1,4] + L[:,4]*dt + self.K*Uold[1:-1,3]*dt*self.Q[1:-1,1])\
-								/ (1+self.K*Uold[1:-1,0]*dt)
+				self.Q[1:-1,4] = (Qold[1:-1,4] + L[:,4]*dt + self.K*Unew[1:-1,3]*dt*self.Q[1:-1,1])\
+								/ (1+self.K*Unew[1:-1,0]*dt)
 				#self.Q[1:-1, 4] = (Qold[1:-1,4]*(
 			elif scheme == "exp":
-				self.Q[1:-1,4] = Qold[1:-1,4]*(np.exp(-self.K*Uold[1:-1,0]*dt)) \
-								 + Unew[1:-1,3]/Unew[1:-1,0] * self.Q[1:-1,1] * (1 - np.exp(-self.K*Unew[1:-1,0]*dt))\
-								 + (1-np.exp(-self.K*Unew[1:-1,0]*dt))/self.K * (L[:,4]/Unew[1:-1,0] - L[:,1]*Unew[1:-1,3]/Unew[1:-1,0]**2)\
-								 + Unew[1:-1,3]/Unew[1:-1,0]*L[:,1]*dt*np.exp(-self.K*Uold[1:-1,0]*dt)
+				new_exp_term = np.exp(-self.K*Unew[1:-1,0]*dt)
+				self.Q[1:-1,4] = Qold[1:-1,4]*new_exp_term \
+								 + Unew[1:-1,3]/Unew[1:-1,0] * self.Q[1:-1,1] * (1 - new_exp_term)\
+								 + (1-new_exp_term)/self.K * (L[:,4]/Unew[1:-1,0] - L[:,1]*Unew[1:-1,3]/Unew[1:-1,0]**2)\
+								 + Unew[1:-1,3]/Unew[1:-1,0]*L[:,1]*dt*new_exp_term
+			
+			# 6) Save the updated primitive variables
+			U = self.Q / self.dx.reshape(-1,1)
+			self.W[1:-1] = self.cons2prim(U[1:-1])
+			
+			# 7) Compute edge states
+			self.W = self.boundary_set(self.W)
+			self.t+=dt	
 			if plotsep is not None:
 				if plotcount % plotsep == 0:
 					ax[0].plot(self.x, self.W[:,3])
@@ -319,12 +328,12 @@ class mesh:
 				if early_stop == plotcount:
 					print("Stopped simulation early at time t=", self.t+dt)
 					break
-			
-			
-			self.t+=dt	
+					
 			plotcount+=1
 			print(plotcount)
 			
+		
+		
 	@property
 	def position(self):
 		return(self.x[1:-1])
