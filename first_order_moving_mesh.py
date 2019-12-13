@@ -32,8 +32,8 @@ class mesh:
 		self.mesh_type = mesh_type
 		self.v = np.full(nx+2, fixed_v)								#velocity of cell centres -- defaults to 0 for Eulerian mesh
 		self.vf = np.full(nx+1, fixed_v)							#velocity of cell faces -- defaults to same as cell centres
-		self.dx = np.full(nx+2, self.xend/(self.nx) ) 			#size of cell -- initially uniform across all cells
-		self.x = (np.arange(-0.5, nx+1))*(self.dx[0])					#position of cell centre
+		self.dx = np.full(nx+2, self.xend/(self.nx) ) 				#size of cell -- initially uniform across all cells
+		self.x = (np.arange(-0.5, nx+1))*(self.dx[0])				#position of cell centre
 		self.t = 0.0												#current time		
 		
 		#	Attributes that will be used later:
@@ -256,7 +256,7 @@ class mesh:
 	"""	Function tying everything together into a hydro solver"""
 	def solve(self, scheme, tend, 
 		      early_stop = None, plotsep=None, timestep=None,   #early_stop = steps til stop; plotsep = steps between plots
-		      feedback=True): 
+		      feedback=False): 
 		print("Solving... \n")
 		self.tend = tend
 		plotcount = 1
@@ -264,8 +264,8 @@ class mesh:
 			f, ax = plt.subplots(2,1)
 			ax[0].plot(self.x, self.W[:,3], color='k')
 			ax[1].plot(self.x, self.W[:,4], color='k')
-			ax[0].scatter(self.x, self.W[:,3], color='k')
-			ax[1].scatter(self.x, self.W[:,4], color='k')
+			#ax[0].scatter(self.x, self.W[:,3], color='k')
+			#ax[1].scatter(self.x, self.W[:,4], color='k')
 		
 		while self.t < self.tend:
 			# 1) Compute face velocity
@@ -294,19 +294,54 @@ class mesh:
 			
 			# 5) First order time integration using Euler's method
 			L = - np.diff(fF, axis=0)
-			Unew[1:-1,:4] = (Qold[1:-1,:4] + L[:,:4]*dt) / self.dx[1:-1].reshape(-1,1)
-			self.Q = Unew * self.dx.reshape(-1,1)	#nb use new dx here to get new Q
-			if scheme == "approx":
-				# must include source term for the dust
-				self.Q[1:-1,4] = (Qold[1:-1,4] + L[:,4]*dt + self.K*Unew[1:-1,3]*dt*self.Q[1:-1,1])\
-								/ (1+self.K*Unew[1:-1,0]*dt)
-				#self.Q[1:-1, 4] = (Qold[1:-1,4]*(
-			elif scheme == "exp":
-				new_exp_term = np.exp(-self.K*Unew[1:-1,0]*dt)
-				self.Q[1:-1,4] = Qold[1:-1,4]*new_exp_term \
-								 + Unew[1:-1,3]/Unew[1:-1,0] * self.Q[1:-1,1] * (1 - new_exp_term)\
-								 + (1-new_exp_term)/self.K * (L[:,4]/Unew[1:-1,0] - L[:,1]*Unew[1:-1,3]/Unew[1:-1,0]**2)\
-								 + Unew[1:-1,3]/Unew[1:-1,0]*L[:,1]*dt*new_exp_term
+			if feedback == False:
+				Unew[1:-1,:4] = (Qold[1:-1,:4] + L[:,:4]*dt) / self.dx[1:-1].reshape(-1,1)
+				self.Q = Unew * self.dx.reshape(-1,1)	#nb use new dx here to get new Q
+				p_d = Qold[1:-1,4]
+				new_p_g = self.Q[1:-1,1]
+				
+				f_g = L[:,1]
+				f_d = L[:,4]
+				
+				rho_d = Unew[1:-1,3]
+				rho_g = Unew[1:-1,0]
+				if scheme == "approx":
+					# must include source term for the dust
+					self.Q[1:-1,4] = (p_d + f_d*dt + self.K*rho_d*dt*new_p_g)\
+									 / (1+self.K*rho_g*dt)
+					#self.Q[1:-1, 4] = (Qold[1:-1,4]*(
+				elif scheme == "exp":
+					exp_term = np.exp(-self.K*Unew[1:-1,0]*dt)
+					self.Q[1:-1,4] = p_d*exp_term \
+									+ rho_d/rho_g * new_p_g * (1 - exp_term)\
+									+ (1-exp_term)/self.K * (f_d/rho_g - f_g*rho_d/rho_g**2)\
+									+ rho_d/rho_g*f_g*dt*exp_term
+			
+			elif feedback == True:
+				# Gas mass flux, Gas Energy flux, dust mass flux
+				Unew[1:-1,0] = (Qold[1:-1,0] + L[:,0]*dt) / self.dx[1:-1]
+				Unew[1:-1,2:4] = (Qold[1:-1,2:4] + L[:,2:4]*dt) / self.dx[1:-1].reshape(-1,1)
+				
+				# Terms, rewritten for clarity
+				rho = Unew[1:-1,0]+Unew[1:-1,3]
+				eps_g = Unew[1:-1,0]/rho
+				eps_d = Unew[1:-1,3]/rho
+				
+				exp_term = np.exp(-self.K*rho*dt)
+				
+				p_g = Qold[1:-1, 1]
+				p_d = Qold[1:-1, 4]
+				
+				f_g = L[:,1]
+				f_d = L[:,4]
+				
+				#Compute dust momentum
+				self.Q[1:-1,4] = p_g*(eps_d - eps_d*exp_term)  +  p_d*(eps_d + eps_g*exp_term) + \
+								 eps_d*(f_d + f_g)*dt  +  (eps_g*f_d - eps_d*f_g)*(1 - exp_term)/(self.K*rho)
+				
+				#Compute gas momentum
+				self.Q[1:-1,1] = dt*(f_d+f_g) + (p_g + p_d) - self.Q[1:-1,4]
+			
 			
 			# 6) Save the updated primitive variables
 			U = self.Q / self.dx.reshape(-1,1)
@@ -317,12 +352,18 @@ class mesh:
 			self.t+=dt	
 			if plotsep is not None:
 				if plotcount % plotsep == 0:
-					ax[0].plot(self.x, self.W[:,3])
-					ax[1].plot(self.x, self.W[:,4])
-					ax[0].scatter(self.x, self.W[:,3])
-					ax[1].scatter(self.x, self.W[:,4])
+					ax[0].set_title(scheme + " " + str(self.t))
+					ax[0].plot(self.pos, self.rho_dust, label="rho_dust")#, alpha=self.t/tend*0.5)
+					ax[1].plot(self.pos, self.v_dust, label="v_dust")#, alpha=self.t/tend*0.5)
+					#ax[0].scatter(self.pos, self.rho_dust, color="red", alpha=self.t/tend*0.5)
+					#ax[1].scatter(self.pos, self.v_dust, color="red", alpha=self.t/tend*0.5)
+					
+					ax[0].plot(self.pos, self.rho_gas, linestyle="--", label="rho_gas")#, alpha=self.t/tend*0.5)
+					ax[1].plot(self.pos, self.v_gas, "b", label="v_gas")#, alpha=self.t/tend*0.5)
+					#ax[0].scatter(self.pos, self.rho_gas, color="b", alpha=self.t/tend*0.5)
+					#ax[1].scatter(self.pos, self.v_gas, color="b", alpha=self.t/tend*0.5)
 					ax[0].grid()
-					plt.pause(0.5)
+					plt.pause(2)
 					
 			if early_stop:
 				if early_stop == plotcount:
@@ -335,7 +376,7 @@ class mesh:
 		
 		
 	@property
-	def position(self):
+	def pos(self):
 		return(self.x[1:-1])
 	
 	@property

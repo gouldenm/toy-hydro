@@ -11,6 +11,14 @@ def analytical(pd0, pg0, rho_g0, rho_d0, K, t):		#NB pg0 can be used because gas
 	sol = pd0*np.exp(-K*rho_g0*t) + (rho_d0/rho_g0)*pg0*(1-np.exp(-K*rho_g0*t))
 	return(sol)
 
+def feedback_analytical(pd0, pg0, rho_g0, rho_d0, K, t):		#NB pg0 can be used because gas is constant
+	rho = rho_g0 + rho_d0
+	ed = rho_d0 / rho
+	eg = rho_g0 / rho 
+	exp = np.exp(-K*rho*t)
+	sol = pg0*(ed - ed*exp) + pd0*(ed+eg*exp) #+ flux terms, 0 for system that's equal everywhere
+	return(sol)
+
 
 #	Run simulations over a range of timesteps
 times = [0.1, 0.3, 0.5, 0.8, 1, 2, 3]
@@ -24,14 +32,15 @@ for t in times:
 	backwards.setup(vL=0.0, rhoL=1.0, PL=1.0, vLd=1.0, rhoLd=1.0, IC="LRsplit", boundary="flow", cutoff=2.0)
 	
 	pd0 = backwards.Q[0,4]
-	true_pdt = analytical(pd0, 0.0, 1.0, 1.0, K, t)
+	#true_pdt = analytical(pd0, 0.0, 1.0, 1.0, K, t) #no feedback
+	true_pdt = feedback_analytical(pd0, 0.0, 1.0, 1.0, K, t)
 	
 	backwards.solve(tend=t, scheme = "approx")
 	bw_pdt = backwards.Q[1,4]
 	
 	exp = mesh(200, 1.0, mesh_type = "Lagrangian", K =K, CFL = 0.5)
 	exp.setup(vL=0.0, rhoL=1.0, PL=1.0, vLd=1.0, rhoLd=1.0, IC="LRsplit", boundary="flow", cutoff=2.0)
-	exp.solve(tend=t, scheme = "exp")
+	exp.solve(tend=t, scheme = "exp", feedback=True)
 	exp_pdt = exp.Q[1,4]
 	
 	err_exp = np.abs(true_pdt - exp_pdt)
@@ -41,7 +50,7 @@ for t in times:
 	errs_bw.append(err_bw)
 
 plt.figure()
-plt.plot(times, errs_bw, "b-", label="BW error")
+#plt.plot(times, errs_bw, "b-", label="BW error")
 plt.plot(times, errs_exp, "r--", label="Exp error")
 plt.yscale("log")
 plt.xscale("log")
@@ -52,8 +61,7 @@ plt.legend()
 plt.pause(1)
 
 
-
-Ns = [10, 20, 40, 50, 100, 200, 300, 400, 500]
+Ns = [10, 20, 40, 50, 100, 200, 300, 400, 500,1000]
 K=10
 t=1.0
 errs_exp=[]
@@ -65,14 +73,15 @@ for N in Ns:
 	backwards.setup(vL=0.0, rhoL=1.0, PL=1.0, vLd=1.0, rhoLd=1.0, IC="LRsplit", boundary="flow", cutoff=2.0)
 	
 	pd0 = backwards.Q[0,4]
-	true_pdt = analytical(pd0, 0.0, 1.0, 1.0, K, t)
+	#true_pdt = analytical(pd0, 0.0, 1.0, 1.0, K, t)
+	true_pdt = feedback_analytical(pd0, 0.0, 1.0, 1.0, K, t)
 	
 	backwards.solve(tend=t, scheme = "approx")
 	bw_pdt = backwards.Q[1,4]
 	
 	exp = mesh(N, 1.0, mesh_type = "Lagrangian", K =K, CFL = 0.5)
 	exp.setup(vL=0.0, rhoL=1.0, PL=1.0, vLd=1.0, rhoLd=1.0, IC="LRsplit", boundary="flow", cutoff=2.0)
-	exp.solve(tend=t, scheme = "exp")
+	exp.solve(tend=t, scheme = "exp", feedback=True, plotsep=100)
 	exp_pdt = exp.Q[1,4]
 	
 	err_exp = np.abs(true_pdt - exp_pdt)
@@ -82,7 +91,7 @@ for N in Ns:
 	errs_bw.append(err_bw)
 
 plt.figure()
-plt.plot(Ns, errs_bw, "b-", label="BW error")
+#plt.plot(Ns, errs_bw, "b-", label="BW error")
 plt.plot(Ns, errs_exp, "r--", label="Exp error")
 plt.plot(Ns, 1e-4/np.array(Ns), 'k', label='1/N')
 plt.plot(Ns, 1e-3/np.array(Ns)**2, '0.5', label='1/N^2')
