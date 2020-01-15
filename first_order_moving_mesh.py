@@ -254,7 +254,7 @@ class mesh:
 	
 	
 	"""	Function tying everything together into a hydro solver"""
-	def solve(self, scheme, tend, 
+	def solve(self, tend, scheme="exp",
 		      early_stop = None, plotsep=None, timestep=None,   #early_stop = steps til stop; plotsep = steps between plots
 		      feedback=False): 
 		print("Solving... \n")
@@ -262,9 +262,12 @@ class mesh:
 		plotcount = 1
 		if plotsep is not None:
 			f, ax = plt.subplots(2,1)
-			ax[0].plot(self.pos, 1.0-self.rho_dust, color='k')
-			ax[1].plot(self.pos, 1.0-self.rho_gas, color='k')
-			#ax[0].scatter(self.x, self.W[:,3], color='k')
+			ax[0].plot(self.pos, self.rho_dust, color='k', label="rho_dust 0")
+			ax[0].set_ylabel("Density")
+			ax[0].plot(self.pos, self.rho_gas, linestyle="--", color='k', label="rho_gas 0")
+			ax[1].plot(self.pos, self.v_dust, label="v_dust 0")
+			ax[1].plot(self.pos, self.v_gas, label="v_gas 0")
+			ax[1].set_ylabel("Velocity")
 			#ax[1].scatter(self.x, self.W[:,4], color='k')
 		
 		while self.t < self.tend:
@@ -347,27 +350,25 @@ class mesh:
 			U = self.Q / self.dx.reshape(-1,1)
 			self.W[1:-1] = self.cons2prim(U[1:-1])
 			
-			#TODO remove these print statements once we understand what's happening with mass...
-			print("Widths", 0.01-self.dx)
-			print("Dust density change", 1.0-self.rho_dust)
-			print("Gas density change", 1.0-self.rho_gas)
 			# 7) Compute edge states
 			self.W = self.boundary_set(self.W)
 			self.t+=dt	
 			if plotsep is not None:
 				if plotcount % plotsep == 0:
-					ax[0].set_title(scheme + " " + str(self.t))
-					ax[0].plot(self.pos, 1.0-self.rho_dust, label="rho_dust")#, alpha=self.t/tend*0.5)
+					ax[0].set_title("time="+str(self.t))
+					ax[0].plot(self.pos, self.rho_dust, label="rho_dust")#, alpha=self.t/tend*0.5)
 					ax[1].plot(self.pos, self.v_dust, label="v_dust")#, alpha=self.t/tend*0.5)
 					#ax[0].scatter(self.pos, self.rho_dust, color="red", alpha=self.t/tend*0.5)
 					#ax[1].scatter(self.pos, self.v_dust, color="red", alpha=self.t/tend*0.5)
 					
-					ax[0].plot(self.pos,  0.01-self.Q[1:-1,0], linestyle="--", label="rho_gas")#, alpha=self.t/tend*0.5)
-					ax[1].plot(self.pos, self.v_gas, "b", label="v_gas")#, alpha=self.t/tend*0.5)
+					ax[0].plot(self.pos, self.rho_gas, linestyle="--", label="rho_gas")#, alpha=self.t/tend*0.5)
+					ax[1].plot(self.pos, self.v_gas, "b", linestyle="--", label="v_gas")#, alpha=self.t/tend*0.5)
 					#ax[0].scatter(self.pos, self.rho_gas, color="b", alpha=self.t/tend*0.5)
 					#ax[1].scatter(self.pos, self.v_gas, color="b", alpha=self.t/tend*0.5)
 					ax[0].grid()
-					plt.pause(5)
+					ax[0].legend()
+					ax[1].legend()
+					plt.pause(0.1)
 					
 			if early_stop:
 				if early_stop == plotcount:

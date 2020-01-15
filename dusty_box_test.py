@@ -20,17 +20,13 @@ def feedback_analytical(pd0, pg0, rho_g0, rho_d0, K, t):		#NB pg0 can be used be
 	return(sol_P)
 
 
-exp = mesh(100, 1.0, mesh_type = "Fixed", K =10, CFL = 0.5)
-exp.setup(vL=0.0, rhoL=1.0, PL=1.0, vLd=1.0, rhoLd=1.0, IC="LRsplit", boundary="flow", cutoff=2.0)
-exp.solve(tend=2.5, scheme = "exp", feedback=True, plotsep=1)
-
-
 #	Run simulations over a range of timesteps
+
 times = [0.1, 0.5, 1, 2, 3]
 K=10
 errs_exp=[]
 errs_bw=[]
-
+"""
 plt.figure()
 plt.title("Gas density")
 for t in times:
@@ -46,7 +42,7 @@ for t in times:
 	
 	exp = mesh(200, 1.0, mesh_type = "Lagrangian", K =K, CFL = 0.5)
 	exp.setup(vL=0.0, rhoL=1.0, PL=1.0, vLd=1.0, rhoLd=1.0, IC="LRsplit", boundary="flow", cutoff=2.0)
-	exp.solve(tend=t, scheme = "exp", feedback=True)
+	exp.solve(tend=t, scheme = "approx", feedback=True)
 	exp_pdt = exp.Q[1,4]
 	
 	plt.plot(exp.rho_gas, label=t)
@@ -71,9 +67,9 @@ plt.ylabel("absolute error")
 plt.title("Error convergence with time")
 plt.legend()
 plt.show()
-
-
 """
+
+
 print("Moving on to scale convergence test...")
 
 Ns = [10, 20, 40, 50, 100, 200, 300, 400, 500,1000]
@@ -96,7 +92,7 @@ for N in Ns:
 	
 	exp = mesh(N, 1.0, mesh_type = "Lagrangian", K =K, CFL = 0.5)
 	exp.setup(vL=0.0, rhoL=1.0, PL=1.0, vLd=1.0, rhoLd=1.0, IC="LRsplit", boundary="flow", cutoff=2.0)
-	exp.solve(tend=t, scheme = "exp", feedback=True)#, plotsep=100)
+	exp.solve(tend=t, scheme = "approx", feedback=True)#, plotsep=100)
 	exp_pdt = exp.Q[1,4]
 	
 	err_exp = np.abs(true_pdt - exp_pdt)
@@ -119,4 +115,4 @@ plt.title("Error convergence with N")
 plt.legend()
 
 plt.show()
-"""
+
