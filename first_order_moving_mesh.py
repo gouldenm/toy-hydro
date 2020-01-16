@@ -20,11 +20,11 @@ class mesh:
 				 K=0,									#constant in dust-gas coupling, dust:gast ratio
 				 CFL=0.5, gamma=1.4):
 		#define indices
-		self.rho_g = 0
-		self.v_g = 1
-		self.P = 2
-		self.rho_d = 3
-		self.v_d = 4
+		self.i_rho_g = 0
+		self.i_p_g = 1
+		self.i_E_g = 2
+		self.i_rho_d = 3
+		self.i_p_d = 4
 		
 		#	Establishing grid:
 		self.nx, self.xend, self.CFL, self.gamma = nx, xend, CFL, gamma
@@ -138,6 +138,7 @@ class mesh:
 		
 	"""HLL Riemann Solver; note this also updates self.v, self.lp, and self.lm"""
 	def riemann_solver(self, WL_in, WR_in, vf):
+		print("Entering Riemann solver...")
 		fHLL = np.full((self.nx+1, 5), 0.)
 		WL, WR = np.copy(WL_in), np.copy(WR_in)
 		#	Transform lab-frame to face frame.
@@ -150,9 +151,13 @@ class mesh:
 		fL = self.prim2flux(WL)
 		fR = self.prim2flux(WR)
 		
+		print(UL)
+		print(fL)
+		
 		#	Calculate signal speeds for gas
 		csl = np.sqrt(self.gamma*WL[:,2]/WL[:,0])
 		csr = np.sqrt(self.gamma*WR[:,2]/WR[:,0])
+		print(csl)
 		self.lm = WL[:,1] - csl
 		self.lp = WR[:,1] + csr
 		#	Calculate GAS flux in frame of face
@@ -175,17 +180,15 @@ class mesh:
 		
 		w_f = self.ld.reshape(-1,1)
 		f_dust = w_f*np.where(w_f > 0, UL[:,3:], UR[:,3:]) 
-
-		#f_dust = fHLL[:,3:] 
 		
 		fHLL[:, 3:] = f_dust
-		
 		
 		#	Calculate net flux in frame of LAB
 		fF = np.copy(fHLL)
 		fF[:,1] += fHLL[:,0]*vf
 		fF[:,2] += 0.5*fHLL[:,0]*vf**2 + fHLL[:,1]*vf
 		fF[:,4] += fHLL[:,3]*vf
+		print(fF)
 		return(fF)
 		
 	
@@ -224,7 +227,6 @@ class mesh:
 		#  If any cells lie outside spatial extent in periodic regime, roll grid so they don't anymore
 		if self.boundary == "periodic":
 			if right_limit != 0:
-				#print("rolled left")
 				self.W[1:-1,:] = np.roll(self.W[1:-1,:], axis=0,shift = self.nx - right_limit)
 				self.W = self.boundary_set(self.W)	#correct ghost cells
 				self.x -= self.x[-2] - self.xend			#shift coordinates to match rolled grid
@@ -272,6 +274,7 @@ class mesh:
 		
 		while self.t < self.tend:
 			# 1) Compute face velocity
+			print("\n"+ str(self.t))
 			if self.mesh_type == "Lagrangian":
 				self.v = np.copy(self.W[:,1])
 				self.vf = (self.v[:-1] + self.v[1:])/2
@@ -281,6 +284,7 @@ class mesh:
 			#WR  = WL.copy()
 			WL, WR = np.copy(self.W)[:-1,:], np.copy(self.W)[1:,:]
 			fF = self.riemann_solver(WL, WR, self.vf)
+			print("Finished Riemann Solver...")
 			Qold = np.copy(self.Q)		#nb use old dx here to get old Q
 			Unew = np.full_like(Qold, np.nan) 
 			
@@ -297,58 +301,54 @@ class mesh:
 			
 			# 5) First order time integration using Euler's method
 			L = - np.diff(fF, axis=0)
-			if feedback == False:
-				Unew[1:-1,:4] = (Qold[1:-1,:4] + L[:,:4]*dt) / self.dx[1:-1].reshape(-1,1)
-				self.Q = Unew * self.dx.reshape(-1,1)	#nb use new dx here to get new Q
-				p_d = Qold[1:-1,4]
-				new_p_g = self.Q[1:-1,1]
-				
-				f_g = L[:,1]
-				f_d = L[:,4]
-				
-				rho_d = Unew[1:-1,3]
-				rho_g = Unew[1:-1,0]
-				if scheme == "approx":
-					# must include source term for the dust
-					self.Q[1:-1,4] = (p_d + f_d*dt + self.K*rho_d*dt*new_p_g)\
-									 / (1+self.K*rho_g*dt)
-					#self.Q[1:-1, 4] = (Qold[1:-1,4]*(
-				elif scheme == "exp":
-					exp_term = np.exp(-self.K*Unew[1:-1,0]*dt)
-					self.Q[1:-1,4] = p_d*exp_term \
-									+ rho_d/rho_g * new_p_g * (1 - exp_term)\
-									+ (1-exp_term)/self.K * (f_d/rho_g - f_g*rho_d/rho_g**2)\
-									+ rho_d/rho_g*f_g*dt*exp_term
+			if scheme == "approx":
+				# must include source term for the dust
+				self.Q[1:-1,4] = (p_d + f_d*dt + self.K*rho_d*dt*new_p_g)\
+								 / (1+self.K*rho_g*dt)
+				#self.Q[1:-1, 4] = (Qold[1:-1,4]*(
 			
-			elif feedback == True:
-				# Gas mass flux, Gas Energy flux, dust mass flux
-				Unew[1:-1,0] = (Qold[1:-1,0] + L[:,0]*dt) / self.dx[1:-1]
-				Unew[1:-1,2:4] = (Qold[1:-1,2:4] + L[:,2:4]*dt) / self.dx[1:-1].reshape(-1,1)
+			elif scheme == "exp":
+				if feedback == True:
+					a = 1
+				else:
+					a = 0
 				
-				# Terms, rewritten for clarity
-				rho = Unew[1:-1,0]+Unew[1:-1,3]
-				eps_g = Unew[1:-1,0]/rho
-				eps_d = Unew[1:-1,3]/rho
+				#	Group terms for clarity
+				rho_d = Unew[1:-1, self.i_rho_d]
+				rho_g = Unew[1:-1, self.i_rho_g]
+				
+				p_g = Qold[1:-1, self.i_p_g]
+				p_d = Qold[1:-1, self.i_p_d]
+				
+				f_g = L[:,self.i_p_g]
+				f_d = L[:,self.i_p_d]
+			
+				rho = a*rho_d + rho_g
+				
+				eps_g = rho_g / rho
+				eps_d = rho_d / rho
 				
 				exp_term = np.exp(-self.K*rho*dt)
 				
-				p_g = Qold[1:-1, 1]
-				p_d = Qold[1:-1, 4]
+				#  Gas density flux, Gas Energy density flux, dust density flux
+				Unew[1:-1,self.i_rho_g] = (Qold[1:-1,self.i_rho_g] + L[:,self.i_rho_g]*dt) / self.dx[1:-1]
+				Unew[1:-1,2:4] = (Qold[1:-1,2:4] + L[:,2:4]*dt) / self.dx[1:-1].reshape(-1,1)
 				
-				f_g = L[:,1]
-				f_d = L[:,4]
+				#  Compute dust momentum
+				self.Q[1:-1, self.i_p_d] = (eps_g*p_d - eps_d*p_g) * exp_term +                      \
+										   + (eps_g*f_d - eps_d*f_g) * (1-exp_term) / (self.K*rho)   \
+										   + eps_d * (a*p_d + p_g)                                   \
+										   + eps_d * (a*f_d + f_g) * dt
 				
-				#Compute dust momentum
-				self.Q[1:-1,4] = p_g*(eps_d - eps_d*exp_term)  +  p_d*(eps_d + eps_g*exp_term) + \
-								 eps_d*(f_d + f_g)*dt  +  (eps_g*f_d - eps_d*f_g)*(1 - exp_term)/(self.K*rho)
-				
-				#Compute gas momentum
-				self.Q[1:-1,1] = dt*(f_d+f_g) + (p_g + p_d) - self.Q[1:-1,4]
-			
-			
+				#  Compute gas momentum
+				self.Q[1:-1, self.i_p_g] = (a*f_d + f_g) * dt        \
+										   + (a*p_d + p_g)           \
+										   - a*self.Q[1:-1, self.i_p_d]
+						
 			# 6) Save the updated primitive variables
 			U = self.Q / self.dx.reshape(-1,1)
 			self.W[1:-1] = self.cons2prim(U[1:-1])
+			
 			
 			# 7) Compute edge states
 			self.W = self.boundary_set(self.W)
