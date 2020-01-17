@@ -20,11 +20,8 @@ Ns = [50, 100,200,500,1000]#,500,1000,2000]
 K=0.001
 Ks = [0.01, 0.1, 1.0, 10., 100.]
 
-grid = mesh(nx, 1.0, K=K, gamma=gamma, mesh_type="Fixed")
-grid.setup(drho=delta, drhod=delta, l=1.0, IC="soundwave", boundary="periodic")
-grid.solve(tend=t, scheme="exp", feedback=True, early_stop=2)
 
-"""
+
 for t in ts:
 	dw = DustyWaveSolver(delta=delta, K = K, feedback = True)
 	sol = dw(t)
@@ -49,7 +46,4 @@ for t in ts:
 	ax[1].legend()
 	plt.pause(2)
 
-
-
-"""
 plt.show()

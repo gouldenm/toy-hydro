@@ -138,7 +138,6 @@ class mesh:
 		
 	"""HLL Riemann Solver; note this also updates self.v, self.lp, and self.lm"""
 	def riemann_solver(self, WL_in, WR_in, vf):
-		print("Entering Riemann solver...")
 		fHLL = np.full((self.nx+1, 5), 0.)
 		WL, WR = np.copy(WL_in), np.copy(WR_in)
 		#	Transform lab-frame to face frame.
@@ -151,13 +150,9 @@ class mesh:
 		fL = self.prim2flux(WL)
 		fR = self.prim2flux(WR)
 		
-		print(UL)
-		print(fL)
-		
 		#	Calculate signal speeds for gas
 		csl = np.sqrt(self.gamma*WL[:,2]/WL[:,0])
 		csr = np.sqrt(self.gamma*WR[:,2]/WR[:,0])
-		print(csl)
 		self.lm = WL[:,1] - csl
 		self.lp = WR[:,1] + csr
 		#	Calculate GAS flux in frame of face
@@ -188,7 +183,6 @@ class mesh:
 		fF[:,1] += fHLL[:,0]*vf
 		fF[:,2] += 0.5*fHLL[:,0]*vf**2 + fHLL[:,1]*vf
 		fF[:,4] += fHLL[:,3]*vf
-		print(fF)
 		return(fF)
 		
 	
@@ -274,7 +268,6 @@ class mesh:
 		
 		while self.t < self.tend:
 			# 1) Compute face velocity
-			print("\n"+ str(self.t))
 			if self.mesh_type == "Lagrangian":
 				self.v = np.copy(self.W[:,1])
 				self.vf = (self.v[:-1] + self.v[1:])/2
@@ -284,7 +277,6 @@ class mesh:
 			#WR  = WL.copy()
 			WL, WR = np.copy(self.W)[:-1,:], np.copy(self.W)[1:,:]
 			fF = self.riemann_solver(WL, WR, self.vf)
-			print("Finished Riemann Solver...")
 			Qold = np.copy(self.Q)		#nb use old dx here to get old Q
 			Unew = np.full_like(Qold, np.nan) 
 			
@@ -312,39 +304,41 @@ class mesh:
 					a = 1
 				else:
 					a = 0
-				
-				#	Group terms for clarity
-				rho_d = Unew[1:-1, self.i_rho_d]
-				rho_g = Unew[1:-1, self.i_rho_g]
-				
 				p_g = Qold[1:-1, self.i_p_g]
 				p_d = Qold[1:-1, self.i_p_d]
 				
 				f_g = L[:,self.i_p_g]
 				f_d = L[:,self.i_p_d]
-			
+				
+				#  Gas density, Gas Energy density, dust density
+				self.Q[1:-1,self.i_rho_g] = (Qold[1:-1,self.i_rho_g] + L[:,self.i_rho_g]*dt)
+				self.Q[1:-1,2:4] = (Qold[1:-1,2:4] + L[:,2:4]*dt)
+				#self.Q[1:-1, self.i_rho_g] = Unew[1:-1, self.i_rho_g] 	#nb use new dx here to get new Q
+				#self.Q[1:-1, 2:4] = Unew[1:-1, 2:4] * self.dx.reshape(-1,1)	#nb use new dx here to get new Q
+				
+				#	Group terms for clarity
+				rho_d = self.Q[1:-1, self.i_rho_d]
+				rho_g = self.Q[1:-1, self.i_rho_g]
+				
 				rho = a*rho_d + rho_g
 				
 				eps_g = rho_g / rho
 				eps_d = rho_d / rho
 				
+				
 				exp_term = np.exp(-self.K*rho*dt)
 				
-				#  Gas density flux, Gas Energy density flux, dust density flux
-				Unew[1:-1,self.i_rho_g] = (Qold[1:-1,self.i_rho_g] + L[:,self.i_rho_g]*dt) / self.dx[1:-1]
-				Unew[1:-1,2:4] = (Qold[1:-1,2:4] + L[:,2:4]*dt) / self.dx[1:-1].reshape(-1,1)
-				
 				#  Compute dust momentum
-				self.Q[1:-1, self.i_p_d] = (eps_g*p_d - eps_d*p_g) * exp_term +                      \
+				
+				self.Q[1:-1, self.i_p_d] = (eps_g*p_d - eps_d*p_g) * exp_term                        \
 										   + (eps_g*f_d - eps_d*f_g) * (1-exp_term) / (self.K*rho)   \
 										   + eps_d * (a*p_d + p_g)                                   \
 										   + eps_d * (a*f_d + f_g) * dt
-				
 				#  Compute gas momentum
 				self.Q[1:-1, self.i_p_g] = (a*f_d + f_g) * dt        \
 										   + (a*p_d + p_g)           \
 										   - a*self.Q[1:-1, self.i_p_d]
-						
+			
 			# 6) Save the updated primitive variables
 			U = self.Q / self.dx.reshape(-1,1)
 			self.W[1:-1] = self.cons2prim(U[1:-1])
