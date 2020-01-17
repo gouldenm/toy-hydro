@@ -11,18 +11,18 @@ xend = 1.0
 nx = 200
 dx = xend/nx
 x = np.arange(0, nx)*dx
-t= 5.0
-ts = [1e-5, 0.2, 0.5, 1.0, 2.0]
 
 #Iterate over different cell numbers to test convergence with N
 N = 100
 Ns = [50, 100,200,500,1000]#,500,1000,2000]
 K=0.001
 Ks = [0.01, 0.1, 1.0, 10., 100.]
+t= 5.0
+ts = [1e-5, 0.2, 0.5, 1.0, 2.0]
 
 
 
-for t in ts:
+for K in Ks:
 	dw = DustyWaveSolver(delta=delta, K = K, feedback = True)
 	sol = dw(t)
 	grid = mesh(nx, 1.0, K=K, gamma=gamma, mesh_type="Fixed")
@@ -30,7 +30,7 @@ for t in ts:
 	grid.solve(tend=t, scheme="exp", feedback=True)
 	
 	f, ax = plt.subplots(2,1)
-	ax[0].set_title("N=" + str(N) + ", t=" + str(t))
+	ax[0].set_title("N=" + str(N) + ", t=" + str(t) + ", K=" + str(K))
 	ax[0].set_ylabel(r"$\rho$")
 	ax[0].plot(grid.pos, grid.rho_gas, 'k-', label=r'gas $\rho$ calc')
 	ax[0].plot(grid.pos, grid.rho_dust, 'r-', label=r'dust $\rho$ calc')

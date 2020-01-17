@@ -311,14 +311,13 @@ class mesh:
 				f_d = L[:,self.i_p_d]
 				
 				#  Gas density, Gas Energy density, dust density
-				self.Q[1:-1,self.i_rho_g] = (Qold[1:-1,self.i_rho_g] + L[:,self.i_rho_g]*dt)
-				self.Q[1:-1,2:4] = (Qold[1:-1,2:4] + L[:,2:4]*dt)
-				#self.Q[1:-1, self.i_rho_g] = Unew[1:-1, self.i_rho_g] 	#nb use new dx here to get new Q
-				#self.Q[1:-1, 2:4] = Unew[1:-1, 2:4] * self.dx.reshape(-1,1)	#nb use new dx here to get new Q
+				Unew[1:-1,self.i_rho_g] = (Qold[1:-1,self.i_rho_g] + L[:,self.i_rho_g]*dt) / self.dx[1:-1]
+				Unew[1:-1,2:4] = (Qold[1:-1,2:4] + L[:,2:4]*dt) / self.dx[1:-1].reshape(-1,1)
+				self.Q = Unew * self.dx.reshape(-1,1)
 				
 				#	Group terms for clarity
-				rho_d = self.Q[1:-1, self.i_rho_d]
-				rho_g = self.Q[1:-1, self.i_rho_g]
+				rho_d = Unew[1:-1, self.i_rho_d]
+				rho_g = Unew[1:-1, self.i_rho_g]
 				
 				rho = a*rho_d + rho_g
 				
