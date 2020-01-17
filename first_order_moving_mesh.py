@@ -288,14 +288,23 @@ class mesh:
 				dt = self.CFL_condition()
 				dt = min(self.tend-self.t, dt)
 			
+			print(dt)
 			# 4) Update mesh.
 			self.update_mesh(dt)
 			
 			# 5) First order time integration using Euler's method
 			L = - np.diff(fF, axis=0)
 			if scheme == "approx":
+				Unew[1:-1,:4] = (Qold[1:-1,:4] + L[:,:4]*dt) / self.dx[1:-1].reshape(-1,1)
+				self.Q = Unew * self.dx.reshape(-1,1)	#nb use new dx here to get new Q
 				# must include source term for the dust
-				self.Q[1:-1,4] = (p_d + f_d*dt + self.K*rho_d*dt*new_p_g)\
+				f_g = L[:,self.i_p_g]
+				f_d = L[:,self.i_p_d]
+				p_g = self.Q[1:-1, self.i_p_g]
+				p_d = Qold[1:-1, self.i_p_d]
+				rho_d = Unew[1:-1, self.i_rho_d]
+				rho_g = Unew[1:-1, self.i_rho_g]
+				self.Q[1:-1,4] = (p_d + f_d*dt + self.K*rho_d*dt*p_g)\
 								 / (1+self.K*rho_g*dt)
 				#self.Q[1:-1, 4] = (Qold[1:-1,4]*(
 			
@@ -328,7 +337,6 @@ class mesh:
 				exp_term = np.exp(-self.K*rho*dt)
 				
 				#  Compute dust momentum
-				
 				self.Q[1:-1, self.i_p_d] = (eps_g*p_d - eps_d*p_g) * exp_term                        \
 										   + (eps_g*f_d - eps_d*f_g) * (1-exp_term) / (self.K*rho)   \
 										   + eps_d * (a*p_d + p_g)                                   \

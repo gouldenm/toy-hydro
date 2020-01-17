@@ -7,25 +7,29 @@ gamma = 5./3
 
 v_rms = []
 
-xend = 1.0
-nx = 200
-dx = xend/nx
-x = np.arange(0, nx)*dx
+
 
 #Iterate over different cell numbers to test convergence with N
 N = 100
-Ns = [50, 100,200,500,1000]#,500,1000,2000]
-K=0.001
+Ns = [50, 100,200,500,1000,2000,5000]#,500,1000,2000]
+K=1.0
 Ks = [0.01, 0.1, 1.0, 10., 100.]
-t= 5.0
-ts = [1e-5, 0.2, 0.5, 1.0, 2.0]
+t= 4.8
+ts = [1e-5, 0.2, 0.6, 1.0, 2.0, 5.0]
 
 
-
-for K in Ks:
+grid = mesh(N, 1.0, K=1., gamma=gamma, mesh_type="Fixed")
+grid.setup(drho=delta, drhod=delta, l=1.0, IC="soundwave", boundary="periodic")
+grid.solve(tend=t, scheme="exp", feedback=True, plotsep=200)
+"""
+for N in Ns:
+	xend = 1.0
+	nx = N
+	dx = xend/nx
+	x = np.arange(0, nx)*dx
 	dw = DustyWaveSolver(delta=delta, K = K, feedback = True)
 	sol = dw(t)
-	grid = mesh(nx, 1.0, K=K, gamma=gamma, mesh_type="Fixed")
+	grid = mesh(N, 1.0, K=K, gamma=gamma, mesh_type="Fixed")
 	grid.setup(drho=delta, drhod=delta, l=1.0, IC="soundwave", boundary="periodic")
 	grid.solve(tend=t, scheme="exp", feedback=True)
 	
@@ -45,5 +49,8 @@ for K in Ks:
 	ax[1].plot(x, sol.v_dust(x), 'r:', label=r'dust $v$ true')
 	ax[1].legend()
 	plt.pause(2)
-
+	
+	print(np.argmax(grid.v_dust), np.argmax(sol.v_dust(x)))
+	print(np.argmax(grid.v_gas), np.argmax(sol.v_gas(x)))
+"""
 plt.show()
