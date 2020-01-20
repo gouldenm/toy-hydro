@@ -252,7 +252,8 @@ class mesh:
 	"""	Function tying everything together into a hydro solver"""
 	def solve(self, tend, scheme="exp",
 		      early_stop = None, plotsep=None, timestep=None,   #early_stop = steps til stop; plotsep = steps between plots
-		      feedback=False): 
+		      feedback=False,
+		      order2=False): 
 		print("Solving... \n")
 		self.tend = tend
 		plotcount = 1
@@ -271,7 +272,26 @@ class mesh:
 			if self.mesh_type == "Lagrangian":
 				self.v = np.copy(self.W[:,1])
 				self.vf = (self.v[:-1] + self.v[1:])/2
-
+			
+			# 1.b) If second order, compute intermediate primitive vector
+			if order2 == True:
+				# Calculate gradient of primitive vector (according to Toro ch 13.4)
+				gradW = (0.5*(self.W[1:-1] - self.W[0:-2]) + 0.5*(self.W[2:] - self.W[1:-1]))/self.dx[1:-1].reshape(-1,1)
+				gradW = self.boundary_set(gradW)
+				# Apply slope limiter
+				dW = np.empty_like(self.W)
+				dW[1:-1] = 0.5*gradW*self.dx[1:-1].reshape(-1, 1)
+				index_gt0 = (dW > 0)
+				index_lt0 = (dW < 0)
+				index_eq0 = (dW == 0)
+				psi = np.empty_like(dW)
+				
+				psi[index_eq0] = 1
+				psi[index_lt0] = 
+				
+					
+				
+				
 			# 2) Compute fluxes
 			#WL = 0.5*(self.W[:-1] + self.W[1:])
 			#WR  = WL.copy()
@@ -288,7 +308,6 @@ class mesh:
 				dt = self.CFL_condition()
 				dt = min(self.tend-self.t, dt)
 			
-			print(dt)
 			# 4) Update mesh.
 			self.update_mesh(dt)
 			
@@ -304,7 +323,7 @@ class mesh:
 				p_d = Qold[1:-1, self.i_p_d]
 				rho_d = Unew[1:-1, self.i_rho_d]
 				rho_g = Unew[1:-1, self.i_rho_g]
-				self.Q[1:-1,4] = (p_d + f_d*dt + self.K*rho_d*dt*p_g)\
+				self.Q[1:-1,self.i_p_d] = (p_d + f_d*dt + self.K*rho_d*dt*p_g)\
 								 / (1+self.K*rho_g*dt)
 				#self.Q[1:-1, 4] = (Qold[1:-1,4]*(
 			
@@ -412,9 +431,9 @@ class mesh:
 	def time(self):
 		return self.t
 
-"""
+
 eg = mesh(200, 1.0, mesh_type = "Lagrangian", K =1.0, CFL = 0.5)
 eg.setup(IC="soundwave", boundary="periodic", vB=0, rhoB=1.0, drho=1e-3, l=1.0, c_s=1.0)
-eg.solve(tend=1.0, scheme = "approx", plotsep=100, early_stop = 500)
+eg.solve(tend=1.0, scheme = "exp", order2=True)
 plt.show()
-"""
+
