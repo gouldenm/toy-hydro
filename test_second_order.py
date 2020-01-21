@@ -272,12 +272,16 @@ class mesh:
 			if self.mesh_type == "Lagrangian":
 				self.v = np.copy(self.W[:,1])
 				self.vf = (self.v[:-1] + self.v[1:])/2
-				
+
 			# 1) Compute fluxes
+			#WL = 0.5*(self.W[:-1] + self.W[1:])
+			#WR  = WL.copy()
 			WL, WR = np.copy(self.W)[:-1,:], np.copy(self.W)[1:,:]
 			fF = self.riemann_solver(WL, WR, self.vf)
+			Qold = np.copy(self.Q)		#nb use old dx here to get old Q
+			Unew = np.full_like(Qold, np.nan) 
 			
-			# 2) Compute Courant condition + timestep
+			# 2) Compute Courant condition
 			if timestep is not None:
 				dt = timestep
 			
@@ -285,103 +289,37 @@ class mesh:
 				dt = self.CFL_condition()
 				dt = min(self.tend-self.t, dt)
 			
-			Qold = np.copy(self.Q)		#nb use old dx here to get old Q
-			Unew = np.full_like(Qold, np.nan) 
-			
 			# 3) If second order, compute intermediate primitive vector, and intermediate flux
 			if order2 == True:
-				# Calculate gradient of primitive vector (according to Toro ch 13.4)
-				gradW = np.copy(self.W)
-				gradW[1:-1] = (0.5*(self.W[1:-1] - self.W[0:-2]) + 0.5*(self.W[2:] - self.W[1:-1]))/self.dx[1:-1].reshape(-1,1)
-				gradW = self.boundary_set(gradW)
-				
-				# *** Slope Limiting ****
-				# A) Compute change in prim variable from centre to right face
-				dW = np.zeros_like(self.W)
-				dW = 0.5*gradW*self.dx.reshape(-1, 1)
-				
-				# B) Get sign of change
-				index_gt0 = (dW > 0)
-				index_lt0 = (dW < 0)
-				index_eq0 = (dW == 0)		
-				
-				# C) Determine degree of limiting due to change from face centre -> right
-				Wr = np.roll(self.W, axis=0, shift=-1)
-				psir = np.zeros_like(dW)
-				psir[index_gt0] = (np.maximum(Wr, self.W)[index_gt0] - self.W[index_gt0])/dW[index_gt0]
-				psir[index_lt0] = (np.minimum(Wr, self.W)[index_lt0] - self.W[index_lt0])/dW[index_lt0]
-				psir[index_eq0] = 1.
-				
-				# D) Determine degree of limiting due to change from face centre -> left
-				# NB because we now move centre -> left, swap min/max and multiply result by -1 to get correct sign
-				Wl = np.roll(self.W, axis=0, shift=1)
-				psil = np.zeros_like(dW)
-				psil[index_gt0] = -1.*(np.minimum(Wl, self.W)[index_gt0] - self.W[index_gt0])/dW[index_gt0]
-				psil[index_lt0] = -1.*(np.maximum(Wl, self.W)[index_lt0] - self.W[index_lt0])/dW[index_lt0]
-				psil[index_eq0] = 1.
-				
-				# Now apply the slope limiting factor...	
-				alpha = np.minimum( np.ones_like(psir), psir, psil)
-				gradW = alpha*gradW
-				
-				# *** Compute time derivatives of primitive variables ***
-				dWdt = np.zeros_like(self.W)
-				
-				rho_g = self.W[:, self.i_rho_g]
-				grad_rho_g = gradW[:, self.i_rho_g]
-				
-				v_g = self.W[:, self.i_p_g]
-				grad_v_g = gradW[:, self.i_p_g]
-				
-				P = self.W[:, self.i_E_g]
-				grad_P = gradW[:, self.i_E_g]
-				
-				rho_d = self.W[:, self.i_rho_d]
-				grad_rho_d = gradW[:, self.i_rho_d]
-				
-				v_d = self.W[:, self.i_p_d]
-				grad_v_d = gradW[:, self.i_p_d]
-				
-				dWdt[:,self.i_rho_g] = - v_g*grad_rho_g - rho_g*grad_v_g
-				dWdt[:,self.i_p_g] = - grad_P/rho_g - v_g*grad_v_g
-				dWdt[:,self.i_E_g] = - self.gamma*P*grad_v_g - v_g * grad_P + self.K*rho_d*v_d - self.K*rho_d*v_g
-				dWdt[:,self.i_rho_d] = - v_d*grad_rho_d - rho_d*grad_v_d
-				dWdt[:,self.i_p_d] = -v_d*grad_v_d - self.K*rho_g*v_d + self.K*rho_g*v_g
-				
-				# 3.A Compute intermediate primitive vector
-				W_int = self.W + dt * dWdt
-				
-				# 3.B Compute intermediate fluxes
-				WL, WR = np.copy(W_int)[:-1,:], np.copy(W_int)[1:,:]
-				fF_int = self.riemann_solver(WL, WR, self.vf)
+				fF_int = np.copy(fF)
+				W_int = np.copy(self.W)
 			
 			# If only first order, just replace intermediate terms with originals...
 			else:
-				fF_int = fF
-				W_int = self.W
+				fF_int = np.copy(fF)
+				W_int = np.copy(self.W)
+			
 			
 			# 4) Update mesh.
 			self.update_mesh(dt)
 			
-			# 5) Perform time integration using Euler's method
+			# 5) Perform time integration
 			L = - np.diff(fF, axis=0)
 			L_int = - np.diff(fF_int, axis=0)
 			
 			
-			#print("\n Int: ", L_int[:5])
-			#print("L:", L[:5])
+			
 			if scheme == "approx":
 				Unew[1:-1,:4] = (Qold[1:-1,:4] + L[:,:4]*dt) / self.dx[1:-1].reshape(-1,1)
 				self.Q = Unew * self.dx.reshape(-1,1)	#nb use new dx here to get new Q
 				# must include source term for the dust
 				f_g = L[:,self.i_p_g]
 				f_d = L[:,self.i_p_d]
-				
 				p_g = self.Q[1:-1, self.i_p_g]
 				p_d = Qold[1:-1, self.i_p_d]
 				rho_d = Unew[1:-1, self.i_rho_d]
 				rho_g = Unew[1:-1, self.i_rho_g]
-				self.Q[1:-1,self.i_p_d] = (p_d + f_d*dt + self.K*rho_d*dt*p_g)\
+				self.Q[1:-1,4] = (p_d + f_d*dt + self.K*rho_d*dt*p_g)\
 								 / (1+self.K*rho_g*dt)
 				#self.Q[1:-1, 4] = (Qold[1:-1,4]*(
 			
@@ -496,5 +434,6 @@ class mesh:
 """
 eg = mesh(200, 1.0, mesh_type = "Lagrangian", K =1.0, CFL = 0.5)
 eg.setup(IC="soundwave", boundary="periodic", vB=0, rhoB=1.0, drho=1e-3, l=1.0, c_s=1.0)
-eg.solve(tend=1.0, scheme = "exp", order2=True)"""
-
+eg.solve(tend=1.0, scheme = "approx", plotsep=100, early_stop = 500)
+plt.show()
+"""

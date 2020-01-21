@@ -1,18 +1,18 @@
 import matplotlib.pyplot as plt
 from dustywave_sol import *
-from first_order_moving_mesh import *
+from second_order_moving_mesh import *
 
 delta = 1e-4
 gamma = 5./3
 
-v_rms = []
+#v_rms = []
 
 
 
 #Iterate over different cell numbers to test convergence with N
 N = 100
-Ns = [50, 100,200,500]#,1000,2000,5000]
-K=1.0e-14
+Ns = [50, 100,200]#,500]#,1000,2000,5000]
+K=1.0
 Ks = [0.01, 0.1, 1.0, 10., 100.]
 t= 5.0
 ts = [1e-5, 0.2, 0.6, 1.0, 2.0, 5.0]
@@ -64,9 +64,6 @@ for N in Ns:
 	ax[0].legend()
 	
 	ax[1].legend()
-	plt.pause(2)
-	
-	print(np.argmax(grid.v_dust), np.argmax(sol.v_dust(x)))
-	print(np.argmax(grid.v_gas), np.argmax(sol.v_gas(x)))
+	plt.pause(0.1)
 
 plt.show()
