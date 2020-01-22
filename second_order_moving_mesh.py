@@ -3,6 +3,8 @@
 	Date: 07/11/2019
 	Added moving mesh as of 27/11/2019
 	Added dust (with gas drag) as of 10/12/2019
+	Added feedback of dust onto gas as of 17/1/2020
+	Brought up to 2nd order as of 21/2020
 	
 	INSTRUCTIONS
 	To run a hydro sim:
@@ -295,7 +297,7 @@ class mesh:
 				gradW[1:-1] = (0.5*(self.W[1:-1] - self.W[0:-2]) + 0.5*(self.W[2:] - self.W[1:-1]))/self.dx[1:-1].reshape(-1,1)
 				gradW = self.boundary_set(gradW)
 				
-				# *** Slope Limiting ****
+				# *** Slope Limiting -- routine from Springel 2010
 				# A) Compute change in prim variable from centre to right face
 				dW = np.zeros_like(self.W)
 				dW = 0.5*gradW*self.dx.reshape(-1, 1)
@@ -308,6 +310,7 @@ class mesh:
 				# C) Determine degree of limiting due to change from face centre -> right
 				Wr = np.roll(self.W, axis=0, shift=-1)
 				psir = np.zeros_like(dW)
+				Wmax = np.maximum(W
 				psir[index_gt0] = (np.maximum(Wr, self.W)[index_gt0] - self.W[index_gt0])/dW[index_gt0]
 				psir[index_lt0] = (np.minimum(Wr, self.W)[index_lt0] - self.W[index_lt0])/dW[index_lt0]
 				psir[index_eq0] = 1.
@@ -324,7 +327,7 @@ class mesh:
 				alpha = np.minimum( np.ones_like(psir), psir, psil)
 				gradW = alpha*gradW
 				
-				# *** Compute time derivatives of primitive variables ***
+				# *** Compute time derivatives of primitive variables (got from Euler equations) ***
 				dWdt = np.zeros_like(self.W)
 				
 				rho_g = self.W[:, self.i_rho_g]
@@ -343,12 +346,14 @@ class mesh:
 				grad_v_d = gradW[:, self.i_p_d]
 				
 				dWdt[:,self.i_rho_g] = v_g*grad_rho_g + rho_g*grad_v_g
-				dWdt[:,self.i_p_g] = grad_P/rho_g + v_g*grad_v_g
-				dWdt[:,self.i_E_g] = self.gamma*P*grad_v_g + v_g * grad_P - self.K*rho_d*v_d + self.K*rho_d*v_g
+				dWdt[:,self.i_p_g] = grad_P/rho_g + v_g*grad_v_g  #- self.K*rho_d*v_d + self.K*rho_d*v_g
+				dWdt[:,self.i_E_g] = self.gamma*P*grad_v_g + v_g * grad_P
 				dWdt[:,self.i_rho_d] =  v_d*grad_rho_d + rho_d*grad_v_d
 				dWdt[:,self.i_p_d] = v_d*grad_v_d + self.K*rho_g*v_d - self.K*rho_g*v_g
 				
-				# 3.A Compute intermediate primitive vector
+				#dWdt *= -1
+				
+				# 3.A Compute intermediate primitive vector (i.e. predicted without transfer between cells)
 				W_int = self.W + dt * dWdt
 				
 				# 3.B Compute intermediate fluxes
