@@ -18,11 +18,12 @@ t= 3.0
 ts = [1e-5, 0.2, 0.6, 1.0, 2.0, 5.0]
 
 
-"""grid = mesh(N, 1.0, K=1., gamma=gamma, mesh_type="Fixed")
+grid = mesh(N, 1.0, K=1., gamma=gamma, mesh_type="Fixed")
 grid.setup(drho=delta, drhod=delta, l=1.0, IC="soundwave", boundary="periodic")
-grid.solve(tend=t, scheme="exp", feedback=True, plotsep=200)
-"""
+grid.solve(tend=0.1, scheme="implicit", feedback=False, order2=True, plotsep=1)
 
+plt.show()
+"""
 rms1 = []
 rms2 = []
 
@@ -35,11 +36,11 @@ for N in Ns:
 	sol = dw(t)	
 	grid = mesh(N, 1.0, K=K, gamma=gamma, mesh_type="Lagrangian")
 	grid.setup(drho=delta, drhod=delta, l=1.0, IC="soundwave", boundary="periodic")
-	grid.solve(tend=t, scheme="exp", feedback=False)
+	grid.solve(tend=t, scheme="implicit", feedback=False)
 	
 	grid2 = mesh(N, 1.0, K=K, gamma=gamma, mesh_type="Lagrangian")
 	grid2.setup(drho=delta, drhod=delta, l=1.0, IC="soundwave", boundary="periodic")
-	grid2.solve(tend=t, scheme="exp", feedback=False, order2=True)
+	grid2.solve(tend=t, scheme="implicit", feedback=False, order2=True)
 	
 	f, ax = plt.subplots(2,2)#, sharey="row")
 	
@@ -76,7 +77,7 @@ for N in Ns:
 	rms1.append(rms_1)
 	rms2.append(rms_2)
 	
-	#plt.pause(0.1)
+	plt.pause(0.1)
 
 print(rms1)
 print(rms2)
@@ -94,4 +95,4 @@ plt.legend()
 plt.ylabel("rms(v_gas)")
 plt.xlabel("N")
 
-plt.show()
+plt.show()"""
