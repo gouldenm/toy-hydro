@@ -33,11 +33,11 @@ for N in Ns:
 	x = np.arange(0, nx)*dx
 	dw = DustyWaveSolver(delta=delta, K = K, feedback = False)
 	sol = dw(t)	
-	grid = mesh(N, 1.0, K=K, gamma=gamma, mesh_type="Fixed")
+	grid = mesh(N, 1.0, K=K, gamma=gamma, mesh_type="Lagrangian")
 	grid.setup(drho=delta, drhod=delta, l=1.0, IC="soundwave", boundary="periodic")
 	grid.solve(tend=t, scheme="exp", feedback=False)
 	
-	grid2 = mesh(N, 1.0, K=K, gamma=gamma, mesh_type="Fixed")
+	grid2 = mesh(N, 1.0, K=K, gamma=gamma, mesh_type="Lagrangian")
 	grid2.setup(drho=delta, drhod=delta, l=1.0, IC="soundwave", boundary="periodic")
 	grid2.solve(tend=t, scheme="exp", feedback=False, order2=True)
 	

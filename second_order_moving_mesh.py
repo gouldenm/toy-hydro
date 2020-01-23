@@ -35,13 +35,15 @@ class mesh:
 		self.v = np.full(nx+2, fixed_v)								#velocity of cell centres -- defaults to 0 for Eulerian mesh
 		self.vf = np.full(nx+1, fixed_v)							#velocity of cell faces -- defaults to same as cell centres
 		self.dx = np.full(nx+2, self.xend/(self.nx) ) 				#size of cell -- initially uniform across all cells
-		self.x = (np.arange(-0.5, nx+1))*(self.dx[0])				#position of cell centre
+		self.x = (np.arange(-0.5, nx+1))*(self.dx[0])				#position of mesh-generating point
+		self.cm= (np.arange(-0.5, nx+1))*(self.dx[0])				#position of cell centre
 		self.t = 0.0												#current time		
 		
 		#	Attributes that will be used later:
 		self.boundary, self.IC = None, None							#Boundary type, initial condition type
 		self.tend = None
 		self.W = np.full((self.nx+2, 5), np.nan)					#primitive vector (lab frame)
+		self.gradW = np.full((self.nx+2, 5), np.nan)				#primitive vector gradients (lab frame)
 		self.Q = np.full((self.nx+2, 5), np.nan)					#Integrated conserved vector
 		self.lm = np.full(nx+1,np.nan)								#Left signal velocity	
 		self.lp = np.full(nx+1,np.nan)								#Right signal velocity
@@ -199,10 +201,14 @@ class mesh:
 	"""	Move cells (i.e. change x coordinate),rearrange cells if any fall off the grid boundaries
 		NB: doesn't work if grid cells exceed spatial extent on both sides """
 	def update_mesh(self, dt):
-		#  Modify x coordinate based on velocity of cell centre
+		#  Modify x coordinate based on velocity of cell
 		self.x += self.v * dt
+		#  Update cell widths (so that each face is halfway between cell-generating points
 		self.dx[1:-1] = (self.x[2:] - self.x[:-2])*0.5
 		self.dx[0], self.dx[-1] = self.dx[1], self.dx[-2]
+		#  Update positions of centre of mass
+		self.cm[1:] = self.x[:-1] + 0.5*(self.x[1:]-self.x[:-1]) + self.dx[1:]*0.5
+		self.cm[0] = self.x[0]
 		
 		
 		#  Check if any (non-ghost) cells exeed the spatial extent of the grid in + x direction
@@ -274,6 +280,60 @@ class mesh:
 			if self.mesh_type == "Lagrangian":
 				self.v = np.copy(self.W[:,1])
 				self.vf = (self.v[:-1] + self.v[1:])/2
+			
+			# 1) If second order, reconstruct primitive vector (i.e. compute gradient in each cell + slope limit)
+			if order2 == True:
+				# Start by getting min / max W, to be used later...
+				Wr = np.roll(self.W, axis=0, shift=-1)
+				Wl = np.roll(self.W, axis=0, shift=1)
+				maxW = np.maximum(Wr, self.W, Wl)
+				minW = np.minimum(Wr, self.W, Wl)
+				print("\n\n")
+				print((maxW == self.W)[5:10,2])
+				print(Wl[5:10,2])
+				print(self.W[5:10,2])
+				print(Wr[5:10,2])
+				
+				#  Compute least squares gradient by minimising difference between adjacent cell value and value got from extrapolating this cell's value w/ gradient
+				gradW = np.zeros_like(self.W)
+				#  First, compute separation between mesh-generating points of cell i and i+1 (ie to right of mesh point)
+				dR = 0.5*(self.x[1:] - self.x[:-1])
+				#  Then compute initial estimate of gradient:
+				gradW[1:-1] = (self.W[1:-1] - self.W[0:-2])/dR[0:-1].reshape(-1,1) + (self.W[2:] - self.W[1:-1])/dR[1:].reshape(-1,1)
+				
+				# *** Slope limiting: Routine from Springel 2010
+				# A) Compute change in prim variable from mesh-generating point to right face
+				dWr = np.zeros_like(self.W)
+				dWr[1:-1] = dR[1:].reshape(-1,1)*gradW[1:-1]
+				
+				# B) Get sign of change from mesh point -> right face
+				index_gt0 = (dWr > 0)
+				index_lt0 = (dWr < 0)
+				index_eq0 = (dWr == 0)
+				
+				# C) Determine if W is a maximum / minimum with an inappropriate gradient...
+				psir = np.zeros_like(dWr)
+				psir[index_gt0] = (maxW[index_gt0] - self.W[index_gt0])/dWr[index_gt0]
+				psir[index_lt0] = (minW[index_lt0] - self.W[index_lt0])/dWr[index_lt0]
+				psir[index_eq0] = 1.
+				
+				# D) Repeat for left face
+				dWl = np.zeros_like(self.W)
+				dWl[1:-1] = -dR[0:-1].reshape(-1,1)*gradW[1:-1]
+				
+				index_gt0 = (dWl > 0)
+				index_lt0 = (dWl < 0)
+				index_eq0 = (dWl == 0)
+				
+				psil = np.zeros_like(dWl)
+				psil[index_gt0] = (maxW[index_gt0] - self.W[index_gt0])/dWl[index_gt0]
+				psil[index_lt0] = (minW[index_lt0] - self.W[index_lt0])/dWl[index_lt0]
+				psil[index_eq0] = 1.
+				
+				# E) Now apply the slope limiting factor + correct boundaries
+				alpha = np.minimum( np.ones_like(psir), psir, psil)
+				gradW = alpha*gradW
+				gradW = self.boundary_set(gradW)
 				
 			# 1) Compute fluxes
 			WL, WR = np.copy(self.W)[:-1,:], np.copy(self.W)[1:,:]
@@ -310,7 +370,7 @@ class mesh:
 				# C) Determine degree of limiting due to change from face centre -> right
 				Wr = np.roll(self.W, axis=0, shift=-1)
 				psir = np.zeros_like(dW)
-				Wmax = np.maximum(W
+				#Wmax = np.maximum(W
 				psir[index_gt0] = (np.maximum(Wr, self.W)[index_gt0] - self.W[index_gt0])/dW[index_gt0]
 				psir[index_lt0] = (np.minimum(Wr, self.W)[index_lt0] - self.W[index_lt0])/dW[index_lt0]
 				psir[index_eq0] = 1.
