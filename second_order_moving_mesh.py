@@ -233,22 +233,6 @@ class mesh:
 				self.W[1:-1,:] = np.roll(self.W[1:-1,:], axis=0,shift = -left_limit)
 				self.W = self.boundary_set(self.W)
 				self.x += (0 - self.x[1])
-		"""
-		elif self.boundary == "flow":
-			if right_limit != 0:
-				#Delete overhanging cells from right end by rolling + overwriting
-				overhang = self.nx - right_limit
-				self.W[1:-1,:] = np.roll(self.W[1:-1,:], axis=0,shift = overhang)
-				self.W[: overhang, :] = self.W[overhang:overhang*2,:]
-				self.W = self.boundary_set(self.W)	#correct ghost cells
-				self.x -= self.x[-2] - self.xend			#shift coordinates to match rolled grid
-			
-			elif left_limit != 0:
-				self.W[1:-1,:] = np.roll(self.W[1:-1,:], axis=0,shift = -left_limit)
-				self.W[-left_limit: -1, :] = self.W[-left_limit*2:-left_limit,:]
-				self.W = self.boundary_set(self.W)	#correct ghost cells
-				self.x -= self.x[-2] - self.xend			#shift coordinates to match rolled grid
-		"""
 	
 	def time_diff_W(self, W, gradW, FB):
 		dWdt = np.zeros_like(W)
@@ -272,6 +256,7 @@ class mesh:
 		dWdt[:,self.i_E_g] = self.gamma*P*grad_v_g + v_g * grad_P
 		dWdt[:,self.i_rho_d] =  v_d*grad_rho_d + rho_d*grad_v_d
 		dWdt[:,self.i_p_d] = v_d*grad_v_d + self.K*rho_g*v_d - self.K*rho_g*v_g
+		dWdt *= -1
 		return(dWdt)
 	
 	"""	Function tying everything together into a hydro solver"""
@@ -295,7 +280,7 @@ class mesh:
 		while self.t < self.tend:
 			# 0. A) Set feedback flag
 			if feedback == True:
-					FB = 1
+				FB = 1
 			else:
 				FB = 0
 				
@@ -307,54 +292,57 @@ class mesh:
 			# 1.A) If second order, reconstruct primitive vector (i.e. compute slope-limited gradient in each cell, get WL, WR)
 			if order2 == True:
 				# Start by getting min / max W, to be used later...
-				Wr = np.roll(self.W, axis=0, shift=-1)
-				Wl = np.roll(self.W, axis=0, shift=1)
-				maxW = np.maximum(np.maximum(Wr, self.W), Wl)
-				minW = np.minimum(np.minimum(Wr, self.W), Wl)
+				Wp = np.roll(self.W, axis=0, shift=-1)
+				Wm = np.roll(self.W, axis=0, shift=1)
+				maxW = np.maximum(np.maximum(Wp, self.W), Wm)
+				minW = np.minimum(np.minimum(Wp, self.W), Wm)
 				
 				#  Compute least squares gradient by minimising difference between adjacent cell value and value got from extrapolating this cell's value w/ gradient
 				#  First, compute separation between mesh-generating points of cell i and i+1 (ie to right of mesh point)
-				dR = 0.5*(self.x[1:] - self.x[:-1])
+				xp = np.roll(self.x, axis=0, shift=-1)
+				xm = np.roll(self.x, axis=0, shift=+1)
+				dp = (xp-self.x)			#distance from mesh point i+1 -> i
+				dm = (xm-self.x)			#distance from mesh point i-1 -> i
 				#  Then compute initial estimate of gradient:
-				self.gradW[1:-1] = (self.W[1:-1] - self.W[0:-2])/dR[0:-1].reshape(-1,1) + (self.W[2:] - self.W[1:-1])/dR[1:].reshape(-1,1)
+				self.gradW = (Wm-self.W)/dm.reshape(-1,1) + (Wp - self.W)/dp.reshape(-1,1)
 				
 				# *** Slope limiting: Routine from Springel 2010
 				# A) Compute change in prim variable from mesh-generating point to right face
-				dWr = np.zeros_like(self.W)
-				dWr[1:-1] = dR[1:].reshape(-1,1)*self.gradW[1:-1]
+				dWp = np.zeros_like(self.W)
+				dWp = dp.reshape(-1,1)*self.gradW*0.5
 				
 				# B) Get sign of change from mesh point -> right face
-				index_gt0 = (dWr > 0)
-				index_lt0 = (dWr < 0)
-				index_eq0 = (dWr == 0)
+				index_gt0 = (dWp > 0)
+				index_lt0 = (dWp < 0)
+				index_eq0 = (dWp == 0)
 				
 				# C) Determine if W is a maximum / minimum with an inappropriate gradient...
-				psir = np.zeros_like(dWr)
-				psir[index_gt0] = (maxW[index_gt0] - self.W[index_gt0])/dWr[index_gt0]
-				psir[index_lt0] = (minW[index_lt0] - self.W[index_lt0])/dWr[index_lt0]
-				psir[index_eq0] = 1.
+				psip = np.zeros_like(dWp)
+				psip[index_gt0] = (maxW[index_gt0] - self.W[index_gt0])/dWp[index_gt0]
+				psip[index_lt0] = (minW[index_lt0] - self.W[index_lt0])/dWp[index_lt0]
+				psip[index_eq0] = 1.
 				
 				# D) Repeat for left face
-				dWl = np.zeros_like(self.W)
-				dWl[1:-1] = -dR[0:-1].reshape(-1,1)*self.gradW[1:-1]
+				dWm = np.zeros_like(self.W)
+				dWm= dm.reshape(-1,1)*self.gradW*0.5
 				
-				index_gt0 = (dWl > 0)
-				index_lt0 = (dWl < 0)
-				index_eq0 = (dWl == 0)
+				index_gt0 = (dWm > 0)
+				index_lt0 = (dWm < 0)
+				index_eq0 = (dWm == 0)
 				
-				psil = np.zeros_like(dWl)
-				psil[index_gt0] = (maxW[index_gt0] - self.W[index_gt0])/dWl[index_gt0]
-				psil[index_lt0] = (minW[index_lt0] - self.W[index_lt0])/dWl[index_lt0]
-				psil[index_eq0] = 1.
+				psim = np.zeros_like(dWm)
+				psim[index_gt0] = (maxW[index_gt0] - self.W[index_gt0])/dWm[index_gt0]
+				psim[index_lt0] = (minW[index_lt0] - self.W[index_lt0])/dWm[index_lt0]
+				psim[index_eq0] = 1.
 				
 				# E) Now apply the slope limiting factor + correct boundaries
-				alpha = np.minimum(np.ones_like(psir), np.minimum(psir, psil))
+				alpha = np.minimum(np.ones_like(psim), np.minimum(psip, psim))
 				self.gradW = alpha*self.gradW
 				self.gradW = self.boundary_set(self.gradW)
 				
 				# F) Finally, get reconstructed WL, WR from gradients, to use in Riemann solver...
-				WL = self.W[:-1] + self.gradW[:-1]*(self.x[1:]-self.x[:-1]).reshape(-1,1)*0.5
-				WR = self.W[1:] - self.gradW[1:]*(self.x[1:]-self.x[:-1]).reshape(-1,1)*0.5
+				WL = self.W[:-1] + self.gradW[:-1]*dp[:-1].reshape(-1,1)*0.5
+				WR = self.W[1:] - self.gradW[1:]*dp[:-1].reshape(-1,1)*0.5
 				
 			#  1.B) If first order, just copy W for WL / WR:
 			else:
@@ -434,7 +422,7 @@ class mesh:
 			eps_g = rho_g / rho
 			eps_d = rho_d / rho
 			
-			if scheme == "implicit":
+			if scheme == "exp":
 				exp_term = np.exp(-self.K*rho*dt)
 				#  Compute dust momentum
 				self.Q[1:-1, self.i_p_d] = (eps_g*p_d - eps_d*p_g) * exp_term                        \
@@ -445,8 +433,8 @@ class mesh:
 				self.Q[1:-1, self.i_p_g] = (FB*f_d + f_g) * dt        \
 										   + (FB*p_d + p_g)           \
 										   - FB*self.Q[1:-1, self.i_p_d]
-			elif scheme == "explicit":
-				print("not working yet")
+			elif scheme == "explicity":
+				self.Q[1:-1, self.i_p_d]
 			
 			# 6) Save the updated primitive variables
 			U = self.Q / self.dx.reshape(-1,1)

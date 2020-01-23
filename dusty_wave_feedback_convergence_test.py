@@ -1,6 +1,7 @@
 import matplotlib.pyplot as plt
 from dustywave_sol import *
-from second_order_moving_mesh import *
+from test_second_order import *
+#from second_order_moving_mesh import *
 
 delta = 1e-4
 gamma = 5./3
@@ -11,16 +12,16 @@ gamma = 5./3
 
 #Iterate over different cell numbers to test convergence with N
 N = 128
-Ns = np.array([128, 258, 512, 1000])
+Ns = np.array([128, 258])#, 512, 1000])
 K=0.1
 Ks = [0.1, 1.0, 10.]
 t= 3.0
 ts = [1e-5, 0.2, 0.6, 1.0, 2.0, 5.0]
 
-
+"""
 grid = mesh(N, 1.0, K=1., gamma=gamma, mesh_type="Fixed")
 grid.setup(drho=delta, drhod=delta, l=1.0, IC="soundwave", boundary="periodic")
-grid.solve(tend=0.1, scheme="implicit", feedback=False, order2=True, plotsep=1)
+grid.solve(tend=0.5, scheme="exp", feedback=False, order2=True, plotsep=40)
 
 plt.show()
 """
@@ -34,13 +35,13 @@ for N in Ns:
 	x = np.arange(0, nx)*dx
 	dw = DustyWaveSolver(delta=delta, K = K, feedback = False)
 	sol = dw(t)	
-	grid = mesh(N, 1.0, K=K, gamma=gamma, mesh_type="Lagrangian")
+	grid = mesh(N, 1.0, K=K, gamma=gamma, mesh_type="Fixed")
 	grid.setup(drho=delta, drhod=delta, l=1.0, IC="soundwave", boundary="periodic")
-	grid.solve(tend=t, scheme="implicit", feedback=False)
+	grid.solve(tend=t, scheme="exp", feedback=False)
 	
-	grid2 = mesh(N, 1.0, K=K, gamma=gamma, mesh_type="Lagrangian")
+	grid2 = mesh(N, 1.0, K=K, gamma=gamma, mesh_type="Fixed")
 	grid2.setup(drho=delta, drhod=delta, l=1.0, IC="soundwave", boundary="periodic")
-	grid2.solve(tend=t, scheme="implicit", feedback=False, order2=True)
+	grid2.solve(tend=t, scheme="exp", feedback=False, order2=True)
 	
 	f, ax = plt.subplots(2,2)#, sharey="row")
 	
@@ -77,10 +78,7 @@ for N in Ns:
 	rms1.append(rms_1)
 	rms2.append(rms_2)
 	
-	plt.pause(0.1)
-
-print(rms1)
-print(rms2)
+	plt.pause(1.0)
 
 plt.figure()
 plt.xscale("log")
@@ -88,11 +86,10 @@ plt.yscale("log")
 plt.plot(Ns, rms1, label="First order")
 plt.plot(Ns, rms2, label="Second order")
 plt.plot(Ns, 1./Ns**2, label="1/N^2")
-plt.plot(Ns, 1./Ns**3, label="1/N^3")
 plt.plot(Ns, 1./Ns, label="1/N")
 plt.title("Delta = " + str(delta))
 plt.legend()
 plt.ylabel("rms(v_gas)")
 plt.xlabel("N")
 
-plt.show()"""
+plt.show()
