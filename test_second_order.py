@@ -453,8 +453,9 @@ class mesh:
 				self.Q[1:-1,self.i_p_d] = (p_d + f_d*dt + self.K*rho_d*dt*p_g)\
 										   / (1+self.K*rho_g*dt)
 				
-				#No feedback term yet...
-				self.Q[1:-1, self.i_p_g] = p_g + f_g*dt
+				self.Q[1:-1, self.i_p_g] = (FB*f_d+f_g)*dt            \
+										   + (FB*p_d + p_g)           \
+										   - FB*self.Q[1:-1, self.i_p_d]
 			
 			# 7) Save the updated primitive variables
 			U = self.Q / self.dx.reshape(-1,1)
@@ -475,15 +476,14 @@ class mesh:
 					#ax[0].scatter(self.pos, self.rho_gas, color="b", alpha=self.t/tend*0.5)
 					#ax[1].scatter(self.pos, self.v_gas, color="b", alpha=self.t/tend*0.5)
 					ax[0].grid()
-					
-					ax[1].plot(self.x, gradW[:,0], label="gradW")
-					ax[1].plot(self.x, gradW_int[:,0], label="gradW'")
+					ax[1].plot(self.x, gradW[:,1], label="gradW")
+					ax[1].plot(self.x, gradW_int[:,1], label="gradW'")
 					ax[1].grid()
 					
 					ax[0].legend()
 					ax[1].legend()
 					
-					plt.pause(5.0)
+					plt.pause(1.0)
 					
 			if early_stop:
 				if early_stop == plotcount:

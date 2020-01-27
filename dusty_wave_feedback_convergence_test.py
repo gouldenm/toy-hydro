@@ -12,7 +12,7 @@ gamma = 5./3
 
 #Iterate over different cell numbers to test convergence with N
 N = 128
-Ns = np.array([64, 127, 256, 512, 1000])
+Ns = np.array([51, 127, 256, 512, 1000])
 K=0.1
 Ks = [0.1, 1.0, 10.]
 t= 3.0
@@ -33,15 +33,15 @@ for N in Ns:
 	nx = N
 	dx = xend/nx
 	x = np.arange(0, nx)*dx
-	dw = DustyWaveSolver(delta=delta, K = K, feedback = False)
+	dw = DustyWaveSolver(delta=delta, K = K, feedback = True)
 	sol = dw(t)	
 	grid = mesh(N, 1.0, K=K, gamma=gamma, mesh_type="Fixed")
 	grid.setup(drho=delta, drhod=delta, l=1.0, IC="soundwave", boundary="periodic")
-	grid.solve(tend=t, scheme="exp", feedback=False)
+	grid.solve(tend=t, scheme="exp", feedback=True)
 	
 	grid2 = mesh(N, 1.0, K=K, gamma=gamma, mesh_type="Fixed")
 	grid2.setup(drho=delta, drhod=delta, l=1.0, IC="soundwave", boundary="periodic")
-	grid2.solve(tend=t, scheme="explicit", feedback=False, order2=True)#, plotsep=30)
+	grid2.solve(tend=t, scheme="explicit", feedback=True, order2=True)# plotsep=5)
 	
 	f, ax = plt.subplots(2,2)#, sharey="row")
 	
@@ -79,7 +79,7 @@ for N in Ns:
 	rms2.append(rms_2)
 	
 	plt.pause(1.0)
-	#plt.show()
+	plt.show()
 
 plt.figure()
 plt.xscale("log")
