@@ -3,7 +3,7 @@ from dustywave_sol import *
 from test_second_order import *
 #from second_order_moving_mesh import *
 
-delta = 1e-4
+delta = 1e-6
 gamma = 5./3
 
 #
@@ -12,7 +12,7 @@ gamma = 5./3
 
 #Iterate over different cell numbers to test convergence with N
 N = 128
-Ns = np.array([128, 258, 512, 1000])
+Ns = np.array([64, 127, 256, 512, 1000])
 K=0.1
 Ks = [0.1, 1.0, 10.]
 t= 3.0
@@ -41,7 +41,7 @@ for N in Ns:
 	
 	grid2 = mesh(N, 1.0, K=K, gamma=gamma, mesh_type="Fixed")
 	grid2.setup(drho=delta, drhod=delta, l=1.0, IC="soundwave", boundary="periodic")
-	grid2.solve(tend=t, scheme="exp", feedback=False, order2=True)
+	grid2.solve(tend=t, scheme="explicit", feedback=False, order2=True)#, plotsep=30)
 	
 	f, ax = plt.subplots(2,2)#, sharey="row")
 	
@@ -79,6 +79,7 @@ for N in Ns:
 	rms2.append(rms_2)
 	
 	plt.pause(1.0)
+	#plt.show()
 
 plt.figure()
 plt.xscale("log")
