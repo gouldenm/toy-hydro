@@ -3,8 +3,6 @@
 	Date: 07/11/2019
 	Added moving mesh as of 27/11/2019
 	Added dust (with gas drag) as of 10/12/2019
-	Added feedback of dust onto gas as of 17/1/2020
-	Brought up to 2nd order as of 21/2020
 	
 	INSTRUCTIONS
 	To run a hydro sim:
@@ -35,15 +33,13 @@ class mesh:
 		self.v = np.full(nx+2, fixed_v)								#velocity of cell centres -- defaults to 0 for Eulerian mesh
 		self.vf = np.full(nx+1, fixed_v)							#velocity of cell faces -- defaults to same as cell centres
 		self.dx = np.full(nx+2, self.xend/(self.nx) ) 				#size of cell -- initially uniform across all cells
-		self.x = (np.arange(-0.5, nx+1))*(self.dx[0])				#position of mesh-generating point
-		self.cm= (np.arange(-0.5, nx+1))*(self.dx[0])				#position of cell centre
+		self.x = (np.arange(-0.5, nx+1))*(self.dx[0])				#position of cell centre
 		self.t = 0.0												#current time		
 		
 		#	Attributes that will be used later:
 		self.boundary, self.IC = None, None							#Boundary type, initial condition type
 		self.tend = None
 		self.W = np.full((self.nx+2, 5), np.nan)					#primitive vector (lab frame)
-		self.gradW = np.full((self.nx+2, 5), 0.0)						#primitive vector gradients (lab frame)
 		self.Q = np.full((self.nx+2, 5), np.nan)					#Integrated conserved vector
 		self.lm = np.full(nx+1,np.nan)								#Left signal velocity	
 		self.lp = np.full(nx+1,np.nan)								#Right signal velocity
@@ -144,7 +140,11 @@ class mesh:
 	def riemann_solver(self, WL_in, WR_in, vf):
 		fHLL = np.full((self.nx+1, 5), 0.)
 		WL, WR = np.copy(WL_in), np.copy(WR_in)
-		
+		#	Transform lab-frame to face frame.
+		WL[:,1] -= vf		# subtract face velocity from gas velocity
+		WR[:,1] -= vf		
+		WL[:,4] -= vf		# subtract face velocity from dust velocity
+		WR[:,4] -= vf
 		UL = self.prim2cons(WL)
 		UR = self.prim2cons(WR)
 		fL = self.prim2flux(WL)
@@ -197,14 +197,10 @@ class mesh:
 	"""	Move cells (i.e. change x coordinate),rearrange cells if any fall off the grid boundaries
 		NB: doesn't work if grid cells exceed spatial extent on both sides """
 	def update_mesh(self, dt):
-		#  Modify x coordinate based on velocity of cell
+		#  Modify x coordinate based on velocity of cell centre
 		self.x += self.v * dt
-		#  Update cell widths (so that each face is halfway between cell-generating points
 		self.dx[1:-1] = (self.x[2:] - self.x[:-2])*0.5
 		self.dx[0], self.dx[-1] = self.dx[1], self.dx[-2]
-		#  Update positions of centre of mass
-		self.cm[1:] = self.x[:-1] + 0.5*(self.x[1:]-self.x[:-1]) + self.dx[1:]*0.5
-		self.cm[0] = self.x[0]
 		
 		
 		#  Check if any (non-ghost) cells exeed the spatial extent of the grid in + x direction
@@ -233,23 +229,8 @@ class mesh:
 				self.W[1:-1,:] = np.roll(self.W[1:-1,:], axis=0,shift = -left_limit)
 				self.W = self.boundary_set(self.W)
 				self.x += (0 - self.x[1])
-		"""
-		elif self.boundary == "flow":
-			if right_limit != 0:
-				#Delete overhanging cells from right end by rolling + overwriting
-				overhang = self.nx - right_limit
-				self.W[1:-1,:] = np.roll(self.W[1:-1,:], axis=0,shift = overhang)
-				self.W[: overhang, :] = self.W[overhang:overhang*2,:]
-				self.W = self.boundary_set(self.W)	#correct ghost cells
-				self.x -= self.x[-2] - self.xend			#shift coordinates to match rolled grid
-			
-			elif left_limit != 0:
-				self.W[1:-1,:] = np.roll(self.W[1:-1,:], axis=0,shift = -left_limit)
-				self.W[-left_limit: -1, :] = self.W[-left_limit*2:-left_limit,:]
-				self.W = self.boundary_set(self.W)	#correct ghost cells
-				self.x -= self.x[-2] - self.xend			#shift coordinates to match rolled grid
-		"""
-	
+		
+		
 	def time_diff_W(self, W, gradW, FB):
 		dWdt = np.zeros_like(W)
 		rho_g = W[:, self.i_rho_g]
@@ -272,16 +253,21 @@ class mesh:
 		dWdt[:,self.i_E_g] = self.gamma*P*grad_v_g + v_g * grad_P
 		dWdt[:,self.i_rho_d] =  v_d*grad_rho_d + rho_d*grad_v_d
 		dWdt[:,self.i_p_d] = v_d*grad_v_d + self.K*rho_g*v_d - self.K*rho_g*v_g
+		dWdt *= -1
 		return(dWdt)
+	
 	
 	"""	Function tying everything together into a hydro solver"""
 	def solve(self, tend, scheme="exp",
 		      early_stop = None, plotsep=None, timestep=None,   #early_stop = steps til stop; plotsep = steps between plots
-		      feedback=False,
-		      order2=False): 
+		      feedback=False, order2=False): 
 		print("Solving... \n")
 		self.tend = tend
 		plotcount = 1
+		if feedback == False:
+			FB = 0
+		else:
+			FB = 1.
 		if plotsep is not None:
 			f, ax = plt.subplots(2,1)
 			ax[0].plot(self.pos, self.rho_dust, color='k', label="rho_dust 0")
@@ -293,70 +279,80 @@ class mesh:
 			#ax[1].scatter(self.x, self.W[:,4], color='k')
 		
 		while self.t < self.tend:
-			# 0. A) Set feedback flag
-			if feedback == True:
-					FB = 1
-			else:
-				FB = 0
-				
-			# 0. B) Compute face velocity
+			# 0) Compute face velocity
 			if self.mesh_type == "Lagrangian":
 				self.v = np.copy(self.W[:,1])
 				self.vf = (self.v[:-1] + self.v[1:])/2
 			
-			# 1.A) If second order, reconstruct primitive vector (i.e. compute slope-limited gradient in each cell, get WL, WR)
+			# 1.A) If second order, reconstruct primitive vector 
+			#      (i.e. compute slope-limited gradient in each cell, get WL, WR)
 			if order2 == True:
-				# Start by getting min / max W, to be used later...
-				Wr = np.roll(self.W, axis=0, shift=-1)
-				Wl = np.roll(self.W, axis=0, shift=1)
-				maxW = np.maximum(np.maximum(Wr, self.W), Wl)
-				minW = np.minimum(np.minimum(Wr, self.W), Wl)
+				# Start by getting min / max W (i.e. max of cell i, i+1, i-1)
+				Wp = np.roll(self.W, axis=0, shift=-1) #cell i+1
+				Wm = np.roll(self.W, axis=0, shift=+1)  #cell i-1
+				maxW = np.maximum(np.maximum(Wp, self.W), Wm)
+				minW = np.minimum(np.minimum(Wp, self.W), Wm)
+				#print(Wm[45:50,0], "\n", self.W[45:50,0], "\n", Wp[45:50,0])
+				#print(maxW[45:50,0], minW[45:50,0])
 				
-				#  Compute least squares gradient by minimising difference between adjacent cell value and value got from extrapolating this cell's value w/ gradient
-				#  First, compute separation between mesh-generating points of cell i and i+1 (ie to right of mesh point)
-				dR = 0.5*(self.x[1:] - self.x[:-1])
-				#  Then compute initial estimate of gradient:
-				self.gradW[1:-1] = (self.W[1:-1] - self.W[0:-2])/dR[0:-1].reshape(-1,1) + (self.W[2:] - self.W[1:-1])/dR[1:].reshape(-1,1)
+				# Compute distance between cell centres
+				xp = np.roll(self.x, axis=0, shift=-1)
+				xm = np.roll(self.x, axis=0, shift=+1)
+				dp = (xp-self.x)	# signed distance i -> i+1
+				dm = (xm-self.x)	# signed distance i -> i-1
 				
-				# *** Slope limiting: Routine from Springel 2010
-				# A) Compute change in prim variable from mesh-generating point to right face
-				dWr = np.zeros_like(self.W)
-				dWr[1:-1] = dR[1:].reshape(-1,1)*self.gradW[1:-1]
+				# Compute least squares gradient
+				gradW = 0.5* ((Wm-self.W)/dm.reshape(-1,1) + (Wp - self.W)/dp.reshape(-1,1))
+				gradW = self.boundary_set(gradW)
 				
-				# B) Get sign of change from mesh point -> right face
-				index_gt0 = (dWr > 0)
-				index_lt0 = (dWr < 0)
-				index_eq0 = (dWr == 0)
+				# ### Slope Limiting (Routine from Springel, 2010) ### 
+				# i) Compute change in prim variable from mesh-generating point -> right face
+				dWp = self.boundary_set( dp.reshape(-1,1)*gradW*0.5 )
 				
-				# C) Determine if W is a maximum / minimum with an inappropriate gradient...
-				psir = np.zeros_like(dWr)
-				psir[index_gt0] = (maxW[index_gt0] - self.W[index_gt0])/dWr[index_gt0]
-				psir[index_lt0] = (minW[index_lt0] - self.W[index_lt0])/dWr[index_lt0]
-				psir[index_eq0] = 1.
+				# ii) Get sign of change from mesh point -> right face
+				index_gt0 = (dWp > 0.)
+				index_lt0 = (dWp < 0.)
+				index_eq0 = (dWp == 0.)
 				
-				# D) Repeat for left face
-				dWl = np.zeros_like(self.W)
-				dWl[1:-1] = -dR[0:-1].reshape(-1,1)*self.gradW[1:-1]
+				# iii) Calculate possible corrections to gradients...
+				psip = np.zeros_like(dWp)
+				psip[index_gt0] = (maxW[index_gt0] - self.W[index_gt0]) / dWp[index_gt0]
+				psip[index_lt0] = (minW[index_lt0] - self.W[index_lt0]) / dWp[index_lt0]
+				psip[index_eq0] = 1.0
 				
-				index_gt0 = (dWl > 0)
-				index_lt0 = (dWl < 0)
-				index_eq0 = (dWl == 0)
+				# iv) Repeat steps i) - iii) for left face
+				dWm = self.boundary_set( dm.reshape(-1,1)*gradW*0.5)
 				
-				psil = np.zeros_like(dWl)
-				psil[index_gt0] = (maxW[index_gt0] - self.W[index_gt0])/dWl[index_gt0]
-				psil[index_lt0] = (minW[index_lt0] - self.W[index_lt0])/dWl[index_lt0]
-				psil[index_eq0] = 1.
+				index_gt0m = (dWm > 0)
+				index_lt0m = (dWm < 0)
+				index_eq0m = (dWm == 0)
 				
-				# E) Now apply the slope limiting factor + correct boundaries
-				alpha = np.minimum(np.ones_like(psir), np.minimum(psir, psil))
-				self.gradW = alpha*self.gradW
-				self.gradW = self.boundary_set(self.gradW)
+				psim = np.zeros_like(dWm)
+				psim[index_gt0m] = (maxW[index_gt0m] - self.W[index_gt0m]) / dWm[index_gt0m]
+				psim[index_lt0m] = (minW[index_lt0m] - self.W[index_lt0m]) / dWm[index_lt0m]
+				psim[index_eq0] = 1.0
 				
-				# F) Finally, get reconstructed WL, WR from gradients, to use in Riemann solver...
-				WL = self.W[:-1] - self.gradW[:-1]*(self.x[1:]-self.x[:-1]).reshape(-1,1)*0.5
-				WR = self.W[1:] + self.gradW[1:]*(self.x[1:]-self.x[:-1]).reshape(-1,1)*0.5
+				# v) Apply slope limiting factor to gradW, correct boundaries
+				alpha = np.minimum(np.ones_like(psim), np.minimum(psip, psim))
+				gradW = self.boundary_set( alpha*gradW )
 				
-			#  1.B) If first order, just copy W for WL / WR:
+				# vi) Finally, get reconstructed WL, WR for use in Riemann solver
+				WL = self.W[:-1] + gradW[:-1] * 0.5 * dp[:-1].reshape(-1,1)
+				WR = self.W[1:] - gradW[1:] * 0.5 * dp[:-1].reshape(-1,1)
+				
+				"""
+				plt.figure()
+				plt.title("W")
+				plt.plot(self.x, self.W[:,1], label="W")
+				plt.scatter(self.x, self.W[:,1], label="W")
+				plt.grid()
+				plt.scatter(self.x[:-1] + 0.5 * dp[:-1], WL[:,1], label="WL")
+				plt.scatter(self.x[1:] - 0.5 * dp[:-1], WR[:,1], label="WR")
+				plt.legend()
+				plt.show()
+				"""
+			
+			# 1.B) If first order, just copy W for WL / WR:
 			else:
 				WL = np.copy(self.W[:-1])
 				WR = np.copy(self.W[1:])
@@ -366,14 +362,13 @@ class mesh:
 			WR[:,1] -= self.vf		
 			WL[:,4] -= self.vf		# subtract face velocity from dust velocity
 			WR[:,4] -= self.vf
-			
-			# 3. A) Compute flux at time t
+				
+			# 3. A) Compute fluxes at time t
 			fF = self.riemann_solver(WL, WR, self.vf)
 			
-			# 3. B) Compute Courant condition + timestep
+			# 3. B) Compute Courant condition from fluxes
 			if timestep is not None:
 				dt = timestep
-			
 			else:
 				dt = self.CFL_condition()
 				dt = min(self.tend-self.t, dt)
@@ -381,8 +376,8 @@ class mesh:
 			# 4. A) If second order, compute predicted flux at time t+dt
 			if order2 == True:
 				# *** Compute time derivatives of primitive variables (got from Euler equations) ***
-				gradWL = self.gradW[:-1]
-				gradWR = self.gradW[1:]
+				gradWL = gradW[:-1]
+				gradWR = gradW[1:]
 				
 				dWdtL = self.time_diff_W(WL, gradWL, FB)
 				dWdtR = self.time_diff_W(WR, gradWR, FB)
@@ -395,7 +390,7 @@ class mesh:
 				
 				# 3.B Compute intermediate fluxes
 				fF_int = self.riemann_solver(W_intL, W_intR, self.vf)
-			
+				
 			# 4. B) If only first order, just replace intermediate terms with originals...
 			else:
 				fF_int = np.copy(fF)
@@ -446,14 +441,14 @@ class mesh:
 										   + (FB*p_d + p_g)           \
 										   - FB*self.Q[1:-1, self.i_p_d]
 			elif scheme == "explicit":
-				print("not working yet")
+				self.Q[1:-1, self.i_p_d]
 			
-			# 6) Save the updated primitive variables
+			# 7) Save the updated primitive variables
 			U = self.Q / self.dx.reshape(-1,1)
 			self.W[1:-1] = self.cons2prim(U[1:-1])
 			
 			
-			# 7) Compute edge states
+			# 8) Compute edge states
 			self.W = self.boundary_set(self.W)
 			self.t+=dt	
 			if plotsep is not None:
@@ -517,5 +512,6 @@ class mesh:
 """
 eg = mesh(200, 1.0, mesh_type = "Lagrangian", K =1.0, CFL = 0.5)
 eg.setup(IC="soundwave", boundary="periodic", vB=0, rhoB=1.0, drho=1e-3, l=1.0, c_s=1.0)
-eg.solve(tend=1.0, scheme = "exp", order2=True)"""
-
+eg.solve(tend=1.0, scheme = "approx", plotsep=100, early_stop = 500)
+plt.show()
+"""

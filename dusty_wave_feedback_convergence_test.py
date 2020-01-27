@@ -12,7 +12,7 @@ gamma = 5./3
 
 #Iterate over different cell numbers to test convergence with N
 N = 128
-Ns = np.array([128, 258])#, 512, 1000])
+Ns = np.array([128, 258, 512, 1000])
 K=0.1
 Ks = [0.1, 1.0, 10.]
 t= 3.0

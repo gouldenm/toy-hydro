@@ -341,8 +341,8 @@ class mesh:
 				self.gradW = self.boundary_set(self.gradW)
 				
 				# F) Finally, get reconstructed WL, WR from gradients, to use in Riemann solver...
-				WL = self.W[:-1] + self.gradW[:-1]*dp[:-1].reshape(-1,1)*0.5
-				WR = self.W[1:] - self.gradW[1:]*dp[:-1].reshape(-1,1)*0.5
+				WL = self.W[:-1] - self.gradW[:-1]*dp[:-1].reshape(-1,1)*0.5
+				WR = self.W[1:] + self.gradW[1:]*dp[:-1].reshape(-1,1)*0.5
 				
 			#  1.B) If first order, just copy W for WL / WR:
 			else:
@@ -433,7 +433,7 @@ class mesh:
 				self.Q[1:-1, self.i_p_g] = (FB*f_d + f_g) * dt        \
 										   + (FB*p_d + p_g)           \
 										   - FB*self.Q[1:-1, self.i_p_d]
-			elif scheme == "explicity":
+			elif scheme == "explicit":
 				self.Q[1:-1, self.i_p_d]
 			
 			# 6) Save the updated primitive variables
