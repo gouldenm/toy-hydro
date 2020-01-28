@@ -41,7 +41,7 @@ for N in Ns:
 	
 	grid2 = mesh(N, 1.0, K=K, gamma=gamma, mesh_type="Fixed")
 	grid2.setup(drho=delta, drhod=delta, l=1.0, IC="soundwave", boundary="periodic")
-	grid2.solve(tend=t, scheme="explicit", feedback=True, order2=True)# plotsep=5)
+	grid2.solve(tend=t, scheme="explicit", feedback=True, order2=True)#, plotsep=500)
 	
 	f, ax = plt.subplots(2,2)#, sharey="row")
 	
@@ -79,7 +79,7 @@ for N in Ns:
 	rms2.append(rms_2)
 	
 	plt.pause(1.0)
-	plt.show()
+	#plt.show()
 
 plt.figure()
 plt.xscale("log")

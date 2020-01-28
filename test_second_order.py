@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 
 class mesh:
 	def __init__(self, 					
-				 nx, xend,								#number of (non-ghost) cells spatial extent of grid
+				 nx, xend,								#number of (non-ghost) cells, spatial extent of grid
 				 mesh_type = "Fixed", fixed_v = 0,		#type of mesh movement (options = "Fixed" or "Lagrangian"), velocity of fixed grid
 				 K=0,									#constant in dust-gas coupling, dust:gast ratio
 				 CFL=0.5, gamma=1.4):
@@ -30,20 +30,20 @@ class mesh:
 		self.nx, self.xend, self.CFL, self.gamma = nx, xend, CFL, gamma
 		self.K = K
 		self.mesh_type = mesh_type
-		self.v = np.full(nx+2, fixed_v)								#velocity of cell centres -- defaults to 0 for Eulerian mesh
-		self.vf = np.full(nx+1, fixed_v)							#velocity of cell faces -- defaults to same as cell centres
-		self.dx = np.full(nx+2, self.xend/(self.nx) ) 				#size of cell -- initially uniform across all cells
-		self.x = (np.arange(-0.5, nx+1))*(self.dx[0])				#position of cell centre
+		self.v = np.full(nx+4, fixed_v)								#velocity of cell centres -- defaults to 0 for Eulerian mesh
+		self.vf = np.full(nx+3, fixed_v)							#velocity of cell faces -- defaults to same as cell centres
+		self.dx = np.full(nx+4, self.xend/(self.nx) ) 				#size of cell -- initially uniform across all cells
+		self.x = (np.arange(-1.0, nx+3))*(self.dx[0])				#position of cell centre
 		self.t = 0.0												#current time		
 		
 		#	Attributes that will be used later:
 		self.boundary, self.IC = None, None							#Boundary type, initial condition type
 		self.tend = None
-		self.W = np.full((self.nx+2, 5), np.nan)					#primitive vector (lab frame)
-		self.Q = np.full((self.nx+2, 5), np.nan)					#Integrated conserved vector
-		self.lm = np.full(nx+1,np.nan)								#Left signal velocity	
-		self.lp = np.full(nx+1,np.nan)								#Right signal velocity
-		self.ld = np.full(nx+1,np.nan)								#Dust signal velocity
+		self.W = np.full((self.nx+4, 5), np.nan)					#primitive vector (lab frame)
+		self.Q = np.full((self.nx+4, 5), np.nan)					#Integrated conserved vector
+		self.lm = np.full(nx+3,np.nan)								#Left signal velocity	
+		self.lp = np.full(nx+3,np.nan)								#Right signal velocity
+		self.ld = np.full(nx+3,np.nan)								#Dust signal velocity
 	
 	
 	"""	Functions to convert from primitive vector to conserved vector and flux"""
@@ -78,11 +78,13 @@ class mesh:
 	"""	Function to impose boundary conditions onto primitive state vectors"""
 	def boundary_set(self, q):
 		if self.boundary == "flow":
-			q[0,:] = q[1,:]
-			q[-1,:] = q[-2,:]
+			q[0,:], q[1,:] = q[2,:], q[2,:]
+			q[-1,:], q[-2,:] = q[-3,:], q[-3,:]
 		elif self.boundary == "periodic":
-			q[0,:] = q[-2,:]
-			q[-1,:] = q[1,:]
+			q[0,:] = q[-4,:]
+			q[1,:] = q[-3,:]
+			q[-1,:] = q[2,:]
+			q[-2,:] = q[3,:]
 		return(q)
 	
 	
@@ -90,7 +92,7 @@ class mesh:
 	def get_W_LRsplit(self, cutoff, 				#cutoff tells where L/R boundary is
 					  rhoL, PL, vL, rhoR, PR, vR,	#gas conditions on left, right
 					  rhoLd, vLd, rhoRd, vRd):		#dust conditions on left, right
-		for i in range(0, self.nx + 2):
+		for i in range(0, self.nx + 4):
 			if self.x[i] <= cutoff*self.xend:
 				self.W[i,0] = rhoL
 				self.W[i,1] = vL
@@ -111,7 +113,7 @@ class mesh:
 						l, c_s):					#wavelength, sound speed, 
 		C = c_s**2*rhoB**(1-self.gamma)/(self.gamma)  	#P = C*rho^gamma
 		k = 2*np.pi/l
-		for i in range(0, self.nx+2):
+		for i in range(0, self.nx+4):
 			#if self.x[i] <= l:
 			self.W[i,0] = rhoB + drho*np.sin(k*self.x[i])
 			self.W[i,1] = vB + c_s* (drho/rhoB)*np.sin(k*self.x[i])
@@ -138,7 +140,7 @@ class mesh:
 		
 	"""HLL Riemann Solver; note this also updates self.v, self.lp, and self.lm"""
 	def riemann_solver(self, WL_in, WR_in, vf):
-		fHLL = np.full((self.nx+1, 5), 0.)
+		fHLL = np.full((self.nx+3, 5), 0.)
 		WL, WR = np.copy(WL_in), np.copy(WR_in)
 		#	Transform lab-frame to face frame.
 		WL[:,1] -= vf		# subtract face velocity from gas velocity
@@ -206,14 +208,14 @@ class mesh:
 		#  Check if any (non-ghost) cells exeed the spatial extent of the grid in + x direction
 		right_limit, left_limit = 0, 0
 		i = 1
-		while i < self.nx + 1:
+		while i < self.nx + 3:
 			if self.x[i] > self.xend:
 				right_limit = i
 				break
 			i+=1
 		#  then work backwards to see if cells exceed spatial extent of the grid in -x direction...
 		while i > 0:
-			if self.x[i] < 0:
+			if self.x[i] < -1.5:
 				left_limit = i
 				break
 			i-=1
@@ -273,7 +275,7 @@ class mesh:
 		
 		# Compute least squares gradient
 		gradW = 0.5* ((Wm-W)/dm.reshape(-1,1) + (Wp - W)/dp.reshape(-1,1))
-		gradW = self.boundary_set(gradW)
+		#gradW = self.boundary_set(gradW)
 		
 		# ### Slope Limiting (Routine from Springel, 2010) ### 
 		# i) Compute change in prim variable from mesh-generating point -> right face
@@ -449,6 +451,8 @@ class mesh:
 				self.Q[1:-1, self.i_p_g] = (FB*f_d + f_g) * dt        \
 										   + (FB*p_d + p_g)           \
 										   - FB*self.Q[1:-1, self.i_p_d]
+			
+			
 			elif scheme == "explicit":
 				self.Q[1:-1,self.i_p_d] = (p_d + f_d*dt + self.K*rho_d*dt*p_g)\
 										   / (1+self.K*rho_g*dt)
@@ -475,10 +479,10 @@ class mesh:
 					#ax[1].plot(self.pos, self.v_gas, "b", linestyle="--", label="v_gas")#, alpha=self.t/tend*0.5)
 					#ax[0].scatter(self.pos, self.rho_gas, color="b", alpha=self.t/tend*0.5)
 					#ax[1].scatter(self.pos, self.v_gas, color="b", alpha=self.t/tend*0.5)
-					ax[0].grid()
+					ax[0].grid(which="major")
 					ax[1].plot(self.x, gradW[:,1], label="gradW")
 					ax[1].plot(self.x, gradW_int[:,1], label="gradW'")
-					ax[1].grid()
+					ax[1].grid(which="major")
 					
 					ax[0].legend()
 					ax[1].legend()
@@ -496,31 +500,31 @@ class mesh:
 		
 	@property
 	def pos(self):
-		return(self.x[1:-1])
+		return(self.x[2:-2])
 	
 	@property
 	def pressure(self):
-		return (self.W[1:-1,2])
+		return (self.W[2:-2,2])
 	
 	@property
 	def rho_gas(self):
-		return (self.W[1:-1,0])
+		return (self.W[2:-2,0])
 	
 	@property
 	def rho_dust(self):
-		return (self.W[1:-1,3])
+		return (self.W[2:-2,3])
 	
 	@property
 	def v_gas (self):
-		return (self.W[1:-1,1])
+		return (self.W[2:-2,1])
 	
 	@property
 	def v_dust (self):
-		return (self.W[1:-1,4])
+		return (self.W[2:-2,4])
 	
 	@property
 	def energy(self):
-		return (self.W[1:-1,2]/(gamma-1) + (self.W[1:-1,0]*self.W[1:-1,1]**2)/2)
+		return (self.W[2:-2,2]/(gamma-1) + (self.W[2:-2,0]*self.W[2:-2,1]**2)/2)
 	
 	@property
 	def time(self):
