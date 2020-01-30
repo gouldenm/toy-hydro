@@ -173,7 +173,7 @@ def solve_euler(Npts, IC, reconstruction, tout, Ca = 0.7):
         flux = HLL_solver(Wp[:-1], Wm[1:])
 
         #5. Update Q
-        return U - dt*np.diff(flux, axis=0)/dx, gradW
+        return dt*np.diff(flux, axis=0)/dx, gradW
     
     def update_stage_prim(W, dt):
         #1. Apply Boundaries
@@ -189,12 +189,11 @@ def solve_euler(Npts, IC, reconstruction, tout, Ca = 0.7):
         for i in range(NHYDRO):
             Wm[:,i], Wp[:,i], gradW[:,i] = R.reconstruct(Wb[:,i])
         
-        
         #4. Compute fluxes
         flux = HLL_solver(Wp[:-1], Wm[1:])
 
         #5. Update Q
-        return U - dt*np.diff(flux, axis=0)/dx, gradW
+        return dt*np.diff(flux, axis=0)/dx
 
     
     def time_diff_W(W, gradW):# ###, FB):
@@ -238,7 +237,8 @@ def solve_euler(Npts, IC, reconstruction, tout, Ca = 0.7):
             # 2) Calculate gradient, 
             # 3.) compute face velocity (in HLL solver), 
             # 4.) return flux-updated U
-            U1, gradW1 =      update_stage(U , dt)
+            F1, gradW1 =      update_stage(U , dt)
+            U1 = U - F1
             # 5.) TODO: Update mesh
             
             # 6) Compute predicted prim vars
@@ -247,11 +247,13 @@ def solve_euler(Npts, IC, reconstruction, tout, Ca = 0.7):
             W1 = W + dWdt*dt
             
             # 7) Compute fluxes again
-            U2, gradW2 = update_stage_prim(W1, dt)
-            # TODO: Work out why this version of updating isn't working.
-            U2, gradW2 = update_stage(U1, dt)
+            Fp = update_stage_prim(W1, dt)
             
-            U  = (U + U2)/2.
+            # 8) Time average (both used dt, so just *0.5)
+            U = U - 0.5*(F1+Fp)
+            """Fp, gradWp = update_stage(U1, dt)
+            Up = U1 - Fp
+            U  = (U + Up)/2."""
         else:
             U, grad  = update_stage(U, dt)
         
