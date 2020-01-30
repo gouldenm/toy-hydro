@@ -72,7 +72,6 @@ def prim2flux(W):
 
 
 def HLL_solver(WL, WR, vf):
-    #TODO: Correct center velocities here
     # Transform lab-frame to face frame.
     WL[:,1] -= vf       # subtract face velocity from gas velocity
     WR[:,1] -= vf       
@@ -114,20 +113,19 @@ def HLLC_solver(Wl, Wr):
     return flux.T
 """
 
-def max_wave_speed(U):
-    W = cons2prim(U)
-    return np.max(np.abs(W[:,1]) + np.sqrt(GAMMA*W[:,2]/W[:,0]))
 
-        
-def solve_euler(Npts, IC, reconstruction, tout, Ca = 0.7, fixed_v = 0.0):
-    """Test schemes using an Explicit TVD RK integration"""
+
+""" Solve the equations of hydrodynamics for gas only on a moving grid """
+def solve_euler(Npts, IC, reconstruction, tout, Ca = 0.7,
+                fixed_v = 0.0, mesh_type = "fixed"):
     # Setup up the grid
     stencil = reconstruction.STENCIL
     order = reconstruction.ORDER
     
     shape = Npts + 2*stencil
-    dx = 1. / Npts
-    xc = np.linspace(-dx*stencil + dx*0.5, 1+ dx*stencil - dx*0.5, shape)
+    dx0 = 1. / Npts
+    dx = np.full(Npts, dx0)
+    xc = np.linspace(-dx0*stencil + dx0*0.5, 1+ dx0*stencil - dx0*0.5, shape)
     
     # Reconstruction function:
     R = reconstruction(xc, 0)
@@ -141,50 +139,60 @@ def solve_euler(Npts, IC, reconstruction, tout, Ca = 0.7, fixed_v = 0.0):
         return Qb
 
     def update_stage(U, dt):
-        #0. Correct velocities TODO: put mesh if/else here
-        vf = fixed_v
-        
         #1. Apply Boundaries
         Ub = boundary(U)
 
         #2. Compute Primitive variables
         Wb = cons2prim(Ub)
-
-        #3. Reconstruct the edge states
+        
+        #3. Correct velocities
+        if mesh_type == "Lagrangian":
+            vp = Wb[:-1,1]
+            vm = Wb[1:,1]
+            vf =  0.5 * (vp+vm)
+        elif mesh_type == "fixed":
+            vf = fixed_v
+        
+        #4. Reconstruct the edge states
         Wp = np.full([U.shape[0]+2,NHYDRO], np.nan)
         Wm = np.full([U.shape[0]+2,NHYDRO], np.nan)
         gradW = np.full([U.shape[0]+2,NHYDRO], np.nan)
         for i in range(NHYDRO):
             Wm[:,i], Wp[:,i], gradW[:,i] = R.reconstruct(Wb[:,i])
         
-        #4. Compute fluxes
+        #5. Compute fluxes
         flux =              HLL_solver(Wp[:-1], Wm[1:], vf)
 
-        #5. Update Q
-        return dt*np.diff(flux, axis=0)/dx, gradW
+        #6. Update Q
+        return dt*np.diff(flux, axis=0)/dx.reshape(-1,1), gradW
     
     def update_stage_prim(W, dt):
-        #0. Correct velocities TODO: put mesh if/else here
-        vf = fixed_v
-        
         #1. Apply Boundaries
         Wb = boundary(W)
 
         #2. Compute Conserved variables
         U = cons2prim(W)
-
-        #3. Reconstruct the edge states
+        
+        #3. Correct velocities
+        if mesh_type == "Lagrangian":
+            vp = Wb[:-1,1]
+            vm = Wb[1:,1]
+            vf =  0.5 * (vp+vm)
+        elif mesh_type == "fixed":
+            vf = fixed_v
+        
+        #4. Reconstruct the edge states
         Wp = np.full([U.shape[0]+2,NHYDRO], np.nan)
         Wm = np.full([U.shape[0]+2,NHYDRO], np.nan)
         gradW = np.full([U.shape[0]+2,NHYDRO], np.nan)
         for i in range(NHYDRO):
             Wm[:,i], Wp[:,i], gradW[:,i] = R.reconstruct(Wb[:,i])
         
-        #4. Compute fluxes
+        #5. Compute fluxes
         flux =                  HLL_solver(Wp[:-1], Wm[1:], vf)
 
-        #5. Update Q
-        return dt*np.diff(flux, axis=0)/dx
+        #6. Update Q
+        return dt*np.diff(flux, axis=0)/dx.reshape(-1,1)
 
     
     def time_diff_W(W, gradW):# ###, FB):
@@ -215,6 +223,26 @@ def solve_euler(Npts, IC, reconstruction, tout, Ca = 0.7, fixed_v = 0.0):
         dWdt *= -1
         return(dWdt)
     
+    def dt_max_Ca(U):
+        W = cons2prim(U)
+        if mesh_type == "moving":
+            wavespeed = np.abs(np.sqrt(GAMMA*W[:,2]/W[:,0]))
+        else:
+            wavespeed = np.abs((W[:,1])-fixed_v) + np.sqrt(GAMMA*W[:,2]/W[:,0])
+        return np.max(Ca * dx / wavespeed)
+    
+    def update_mesh(xc, dt):
+    #  Modify x coordinate based on velocity of cell centre
+        if mesh_type == "Lagrangian":
+            xc = xc + W[:,1]*dt
+        else:
+            xc = xc + fixed_v*dt
+        xc_ng = xc[stencil:-stencil]
+        dx[1:-1] = (xc_ng[2:] - xc_ng[:-2])*0.5
+        dx[0], dx[-1] = dx[1], dx[-2]
+        return(xc, dx)
+    
+    
     # Set the initial conditions
     W = IC(xc[stencil:-stencil])
     U = prim2cons(W)
@@ -222,7 +250,7 @@ def solve_euler(Npts, IC, reconstruction, tout, Ca = 0.7, fixed_v = 0.0):
     t = 0
     while t < tout:
         # 1) Find new timestep
-        dtmax = Ca * dx / max_wave_speed(U)
+        dtmax = dt_max_Ca(U)
         dt = min(dtmax, tout-t)
         if order == 2:
             # 2) Calculate gradient, 
@@ -230,7 +258,9 @@ def solve_euler(Npts, IC, reconstruction, tout, Ca = 0.7, fixed_v = 0.0):
             # 4.) return flux-updated U
             F1, gradW1 =      update_stage(U , dt)
             U1 = U - F1
+            
             # 5.) TODO: Update mesh
+            xc, dx = update_mesh(xc, dt)
             
             # 6) Compute predicted prim vars
             W = cons2prim(U)
@@ -253,7 +283,10 @@ def solve_euler(Npts, IC, reconstruction, tout, Ca = 0.7, fixed_v = 0.0):
 
     xc = xc[stencil:-stencil]
     return xc, cons2prim(U)
-                
+
+
+
+
 def _test_convergence(IC, pmin=4, pmax=10, figs_evol=None, fig_err=None):
     N = 2**np.arange(pmin, pmax+1)
     scheme = Arepo2
@@ -262,8 +295,8 @@ def _test_convergence(IC, pmin=4, pmax=10, figs_evol=None, fig_err=None):
     label=scheme.__name__
     for Ni in N:
         print (scheme.__name__, Ni)
-        _, W0 = solve_euler(Ni, IC, scheme, 0, Ca = 0.4, fixed_v = 5.0)
-        x, W = solve_euler(Ni, IC, scheme, 3.0, Ca = 0.4)
+        _, W0 = solve_euler(Ni, IC, scheme, 0, Ca = 0.4, mesh_type = "Lagrangian", fixed_v = 0.)
+        x, W = solve_euler(Ni, IC, scheme, 3.0, Ca = 0.4, mesh_type = "Lagrangian",fixed_v = 0.)
         if figs_evol is not None:
             c = figs_evol[0].plot(x, W[:,0], c=c, 
                                   label=label)[0].get_color()
