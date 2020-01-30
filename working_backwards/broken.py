@@ -4,45 +4,39 @@ import numpy as np
 GAMMA = 5/3.
 NHYDRO = 3
 
-class Arepo2(object):
-    """Second-order reconstruction as in AREPO."""
-    STENCIL = 2
-    ORDER = 2
-    def __init__(self, xc, m):
-        self._xc = xc
-        self._dx = xc[2:] - xc[:-2]
-        self._xe = 0.5*(xc[1:] + xc[:-1])
+def arepo2(Q, xc):
+    xe = 0.5*(xc[1:] + xc[:-1])
+    dx = (xc[2:] - xc[:-2])*0.5
+    """Reconstruct the left/right states"""
+    Qm = Q[:-2]
+    Q0 = Q[1:-1]
+    Qp = Q[2:]
+
+    Qmax = np.maximum(np.maximum(Qp, Qm), Q0)
+    Qmin = np.minimum(np.minimum(Qp, Qm), Q0)
+    
+    #Not the least squares estimate, but what is used in AREPO code release
+    grad = (Qp - Qm) / dx
+    
+    dQ = grad*(xe[1:] - xc[1:-1])
+    Qp = Q0 + dQ
+    #print((xe[1:] - xc[1:-1])[10])
         
-    def reconstruct(self, Q):
-        """Reconstruct the left/right states"""
-        Qm = Q[:-2]
-        Q0 = Q[1:-1]
-        Qp = Q[2:]
-
-        Qmax = np.maximum(np.maximum(Qp, Qm), Q0)
-        Qmin = np.minimum(np.minimum(Qp, Qm), Q0)
+    pos = Qp > Qmax ; neg = Qp < Qmin
+    phir = np.where(pos, (Qmax - Q0)/dQ, np.where(neg, (Qmin - Q0)/dQ, 1))
         
-        #Not the least squares estimate, but what is used in AREPO code release
-        grad = (Qp - Qm) / self._dx
+    dQ = grad*(xe[0:-1] - xc[1:-1])
+    Qm = Q0 + dQ
 
-        dQ = grad*(self._xe[1:] - self._xc[1:-1])
-        Qp = Q0 + dQ
+    pos = Qm > Qmax ; neg = Qm < Qmin
+    phil = np.where(pos, (Qmax - Q0)/dQ, np.where(neg, (Qmin - Q0)/dQ, 1))
 
-        pos = Qp > Qmax ; neg = Qp < Qmin
-        phir = np.where(pos, (Qmax - Q0)/dQ, np.where(neg, (Qmin - Q0)/dQ, 1))
-        
-        dQ = grad*(self._xe[0:-1] - self._xc[1:-1])
-        Qm = Q0 + dQ
-
-        pos = Qm > Qmax ; neg = Qm < Qmin
-        phil = np.where(pos, (Qmax - Q0)/dQ, np.where(neg, (Qmin - Q0)/dQ, 1))
-
-        alpha = np.maximum(0, np.minimum(1, np.minimum(phir, phil)))
-        grad *= alpha
-        Qm = Q0 + grad*(self._xe[0:-1] - self._xc[1:-1])
-        Qp = Q0 + grad*(self._xe[1:] - self._xc[1:-1])
-        
-        return Qm, Qp, grad
+    alpha = np.maximum(0, np.minimum(1, np.minimum(phir, phil)))
+    grad *= alpha
+    Qm = Q0 + grad*(xe[0:-1] - xc[1:-1])
+    Qp = Q0 + grad*(xe[1:] - xc[1:-1])
+    
+    return Qm, Qp, grad
 
 
 def prim2cons(W):
@@ -68,9 +62,10 @@ def prim2flux(W):
 
 
 def HLL_solver(WL, WR, vf):
-    #TODO: Correct center velocities here
-    WL[:,1] -= vf
-    WR[:,1] -= vf
+    # Transform lab-frame to face frame.
+    WL[:,1] -= vf       # subtract face velocity from gas velocity
+    WR[:,1] -= vf      
+    
     UL = prim2cons(WL)
     UR = prim2cons(WR)
     
@@ -83,8 +78,8 @@ def HLL_solver(WL, WR, vf):
     Sm = (WL[:,1] - csl).reshape(-1,1)
     Sp = (WR[:,1] + csr).reshape(-1,1)
 
-    # ### Calculate gas flux in frame of face...###
-    # HLL central state
+    
+    # HLL central state in face frame
     fHLL = (Sp*fL - Sm*fR + Sp*Sm*(UR - UL)) / (Sp - Sm)
 
     # Left / Right states
@@ -93,12 +88,11 @@ def HLL_solver(WL, WR, vf):
     fHLL[indexL] = fL[indexL]
     fHLL[indexR] = fR[indexR]
     
-    # ### Modify gas flux to frame of lab ###
+    # Correct to lab frame
     fHLL_lab = np.copy(fHLL)
     fHLL_lab[:,1] += fHLL[:,0]*vf
     fHLL_lab[:,2] += 0.5*fHLL[:,0]*vf**2 + fHLL[:,1]*vf
         
-          
     return fHLL_lab
 
 """_HLLC = HLLC(gamma=GAMMA)
@@ -109,20 +103,19 @@ def HLLC_solver(Wl, Wr):
     return flux.T
 """
 
-        
-def solve_euler(Npts, IC, reconstruction, tout, Ca = 0.7, mesh_type = "fixed", fixed_v = 0.0):#mesh-type = "moving" or "fixed"
-    """Test schemes using an Explicit TVD RK integration"""
+
+
+""" Solve the equations of hydrodynamics for gas only on a moving grid """
+def solve_euler(Npts, IC, tout, Ca = 0.7,
+                fixed_v = 0.0, mesh_type = "fixed"):
     # Setup up the grid
-    stencil = reconstruction.STENCIL
-    order = reconstruction.ORDER
+    stencil = 2
+    order = 2
     
     shape = Npts + 2*stencil
-    dx = 1. / Npts
-    dx = np.full(shape, 1/Npts )
-    xc = np.linspace(-dx[0]*stencil + dx[0]*0.5, 1+ dx[0]*stencil - dx[0]*0.5, shape)
-    
-    # Reconstruction function:
-    R = reconstruction(xc, 0)
+    dx0 = 1. / Npts
+    dx = np.full(Npts, dx0)
+    xc = np.linspace(-dx0*stencil + dx0*0.5, 1+ dx0*stencil - dx0*0.5, shape)
     
     def boundary(Q):
         Qb = np.empty([shape, NHYDRO])
@@ -132,74 +125,65 @@ def solve_euler(Npts, IC, reconstruction, tout, Ca = 0.7, mesh_type = "fixed", f
 
         return Qb
 
-    def update_stage(U, dt):
+    def update_stage(U, dt, xc):
         #1. Apply Boundaries
         Ub = boundary(U)
 
         #2. Compute Primitive variables
         Wb = cons2prim(Ub)
         
-        #3. Correct for face velocities
-        if mesh_type == "moving":
-            vp = Wb[:-1,1]
-            vm = Wb[1:,1]
-            vf = 0.5 * (vp+vm)
-        elif mesh_type == "fixed":
-            vf = fixed_v
-        Wb[:,1] = Wb[:,1] - vf
-
-        #4. Reconstruct the edge states
-        Wp = np.full([U.shape[0]+2,NHYDRO], np.nan)
-        Wm = np.full([U.shape[0]+2,NHYDRO], np.nan)
-        gradW = np.full([U.shape[0]+2,NHYDRO], np.nan)
-        for i in range(NHYDRO):
-            Wm[:,i], Wp[:,i], gradW[:,i] = R.reconstruct(Wb[:,i])
-        
-        #5. Compute fluxes
-        flux = HLL_solver(Wp[:-1], Wm[1:], vf)
-
-        #6. Update Q
-        return dt*np.diff(flux, axis=0)/dx[stencil:-stencil].reshape(-1,1), gradW
-    
-    def update_stage_prim(W, dt):
-        #1. Compute Conserved variables
-        U = cons2prim(W)
-        
-        #2. Apply Boundaries
-        Wb = boundary(W)
-        
-        #3. Correct for face velocities (done for prim which won't be used again -- only fluxes will)
-        if mesh_type == "moving":
-            vp = Wb[:-1,1]
-            vm = Wb[1:,1]
-            vf = 0.5 * (vp+vm)
-        elif mesh_type == "fixed":
-            vf = fixed_v
-        Wb[:,1] = Wb[:,1] - vf
-
-        #4. Reconstruct the edge states
-        Wp = np.full([U.shape[0]+2,NHYDRO], np.nan)
-        Wm = np.full([U.shape[0]+2,NHYDRO], np.nan)
-        gradW = np.full([U.shape[0]+2,NHYDRO], np.nan)
-        for i in range(NHYDRO):
-            Wm[:,i], Wp[:,i], gradW[:,i] = R.reconstruct(Wb[:,i])
-        
-        #5. Compute fluxes
-        flux =          HLL_solver(Wp[:-1], Wm[1:], vf)
-
-        #6. Update Q
-        return dt*np.diff(flux, axis=0)/dx[stencil:-stencil].reshape(-1,1)
-
-    
-    def time_diff_W(W, gradW):# ###, FB):
-        if mesh_type == "moving":
-            vp = W[:-1,1]
-            vm = W[1:,1]
+        #3. Correct velocities
+        if mesh_type == "Lagrangian":
+            vp = Wb[1:-2,1]
+            vm = Wb[2:-1,1]
             vf =  0.5 * (vp+vm)
         elif mesh_type == "fixed":
             vf = fixed_v
-        W[:,1] = W[:,1] - vf
         
+        #4. Reconstruct the edge states
+        Wp = np.full([U.shape[0]+2,NHYDRO], np.nan)
+        Wm = np.full([U.shape[0]+2,NHYDRO], np.nan)
+        gradW = np.full([U.shape[0]+2,NHYDRO], np.nan)
+        for i in range(NHYDRO):
+            Wm[:,i], Wp[:,i], gradW[:,i] = arepo2(Wb[:,i], xc)
+        
+        #5. Compute fluxes
+        flux =              HLL_solver(Wp[:-1], Wm[1:], vf)
+
+        #6. Update Q
+        return dt*np.diff(flux, axis=0)/dx.reshape(-1,1), gradW
+    
+    def update_stage_prim(W, dt, xc):
+        #1. Apply Boundaries
+        Wb = boundary(W)
+
+        #2. Compute Conserved variables
+        U = cons2prim(W)
+        
+        #3. Correct velocities
+        if mesh_type == "Lagrangian":
+            vp = Wb[1:-2,1]
+            vm = Wb[2:-1,1]
+            vf =  0.5 * (vp+vm)
+        elif mesh_type == "fixed":
+            vf = fixed_v
+        
+        #4. Reconstruct the edge states
+        Wp = np.full([U.shape[0]+2,NHYDRO], np.nan)
+        Wm = np.full([U.shape[0]+2,NHYDRO], np.nan)
+        gradW = np.full([U.shape[0]+2,NHYDRO], np.nan)
+        for i in range(NHYDRO):
+            Wm[:,i], Wp[:,i], gradW[:,i] = arepo2(Wb[:,i], xc)
+        
+        #5. Compute fluxes
+        flux =                  HLL_solver(Wp[:-1], Wm[1:], vf)
+
+        #6. Update Q
+        return dt*np.diff(flux, axis=0)/dx.reshape(-1,1)
+
+    
+    def time_diff_W(W, gradW):# ###, FB):
+        # TODO: Correct velocities
         dWdt = np.zeros_like(W)
         
         rho_g = W[:, 0]
@@ -226,24 +210,26 @@ def solve_euler(Npts, IC, reconstruction, tout, Ca = 0.7, mesh_type = "fixed", f
         dWdt *= -1
         return(dWdt)
     
-    def update_mesh(xc, dt):
-    #  Modify x coordinate based on velocity of cell centre
-        if mesh_type == "moving":
-            v = W[:,1]
-            xc = xc + v*dt
-        else:
-            xc = xc + fixed_v*dt
-        dx[1:-1] = (xc[2:] - xc[:-2])*0.5
-        dx[0], dx[-1] = dx[1], dx[-2]
-        return(xc, dx)
-    
-    def max_time(U, dx, Ca=0.5):
+    def dt_max_Ca(U):
         W = cons2prim(U)
         if mesh_type == "moving":
             wavespeed = np.abs(np.sqrt(GAMMA*W[:,2]/W[:,0]))
         else:
             wavespeed = np.abs((W[:,1])-fixed_v) + np.sqrt(GAMMA*W[:,2]/W[:,0])
-        return np.max(Ca * dx[stencil:-stencil] / wavespeed)
+        return np.max(Ca * dx / wavespeed)
+    
+    def update_mesh(xc, dt, W):
+    #  Modify x coordinate based on velocity of cell centre
+        if mesh_type == "Lagrangian":
+            Wb = boundary(W)
+            xc = xc + Wb[:,1]*dt
+        else:
+            xc = xc + fixed_v*dt
+        xc_ng = xc[stencil:-stencil]
+        dx[1:-1] = (xc_ng[2:] - xc_ng[:-2])*0.5
+        dx[0], dx[-1] = dx[1], dx[-2]
+        return(xc, dx)
+    
     
     # Set the initial conditions
     W = IC(xc[stencil:-stencil])
@@ -252,33 +238,34 @@ def solve_euler(Npts, IC, reconstruction, tout, Ca = 0.7, mesh_type = "fixed", f
     t = 0
     while t < tout:
         # 1) Find new timestep
-        dtmax = max_time(U, dx, Ca)
+        dtmax = dt_max_Ca(U)
         dt = min(dtmax, tout-t)
         if order == 2:
             # 2) Calculate gradient, 
             # 3.) compute face velocity (in HLL solver), 
             # 4.) return flux-updated U
-            F1, gradW1 =      update_stage(U , dt)
+            F1, gradW1 =      update_stage(U , dt, xc)
             U1 = U - F1
             
             # 5.) TODO: Update mesh
-            xc, dx = update_mesh(xc, dt)
+            xc, dx = update_mesh(xc, dt, W)
             
             # 6) Compute predicted prim vars
             W = cons2prim(U)
-            dWdt =            time_diff_W(W, gradW1[1:-1])
-            Wp = W + dWdt*dt
+            dWdt = time_diff_W(W, gradW1[1:-1])
+            W1 = W + dWdt*dt
             
             # 7) Compute fluxes again
-            Fp =              update_stage_prim(Wp, dt)
+            Fp = update_stage_prim(W1, dt, xc)
             
             # 8) Time average (both used dt, so just *0.5)
-            U = U - 0.5*(F1+Fp)
-            Fp, gradWp = update_stage(U1, dt)
+            #U = U - 0.5*(F1+Fp)
+            Fp, gradWp = update_stage(U1, dt, xc)
             Up = U1 - Fp
             U  = (U + Up)/2.
         else:
-            U, grad  = update_stage(U, dt)
+            F, grad  = update_stage(U, dt, xc)
+            U = U - F
         
         t = min(tout, t+dt)
 
@@ -287,16 +274,17 @@ def solve_euler(Npts, IC, reconstruction, tout, Ca = 0.7, mesh_type = "fixed", f
 
 
 
-def _test_convergence(IC, pmin=4, pmax=10, figs_evol=None, fig_err=None):
+
+def _test_convergence(IC, pmin=4, pmax=10, figs_evol=None, fig_err=None, mesh_type="fixed", fixed_v=0.):
     N = 2**np.arange(pmin, pmax+1)
-    scheme = Arepo2
+    scheme = arepo2
     errs = []
     c=None
     label=scheme.__name__
     for Ni in N:
         print (scheme.__name__, Ni)
-        _, W0 = solve_euler(Ni, IC, scheme, 0, Ca = 0.4, fixed_v = 1.0)
-        x, W = solve_euler(Ni, IC, scheme, 3.0, Ca = 0.4, fixed_v = 1.0)
+        _, W0 = solve_euler(Ni, IC, 0, Ca = 0.4, mesh_type = mesh_type, fixed_v = fixed_v)
+        x, W = solve_euler(Ni, IC, 3.0, Ca = 0.4, mesh_type = mesh_type,fixed_v = fixed_v)
         if figs_evol is not None:
             c = figs_evol[0].plot(x, W[:,0], c=c, 
                                   label=label)[0].get_color()
@@ -335,6 +323,8 @@ def init_wave(xc, cs0=1.0, rho0=1.0, v0=1.0, drho=1e-6):
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
     _test_convergence(init_wave, 
+                      mesh_type="fixed", 
+                      fixed_v=5.,
                       figs_evol=plt.subplots(3, 1)[1],
                       fig_err=plt.subplots(1)[1])
 

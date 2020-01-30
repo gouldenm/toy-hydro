@@ -1,57 +1,6 @@
 from __future__ import print_function
+from arepo_reconstruction.py import reconstruction
 import numpy as np
-
-GAMMA = 5/3.
-NHYDRO = 3
-
-class Arepo2(object):
-    """Second-order reconstruction as in AREPO."""
-    STENCIL = 2
-    ORDER = 2
-    def __init__(self, xc, m):
-        if m != 0:
-            raise ValueError("Arepo2 assumes m = 0")
-
-        self._xc = xc
-        #### self._xc = xc = compute_centroids(xe, m)
-        self._dx = xc[2:] - xc[:-2]
-        self._xe = 0.5*(xc[1:] + xc[:-1])
-
-    def reconstruct(self, Q, xc):
-        """Reconstruct the left/right states"""
-        #### self._xc = xc = compute_centroids(xe, m)
-        dx = xc[2:] - xc[:-2]
-        xe = 0.5*(xc[1:] + xc[:-1])
-        
-        Qm = Q[:-2]
-        Q0 = Q[1:-1]
-        Qp = Q[2:]
-
-        Qmax = np.maximum(np.maximum(Qp, Qm), Q0)
-        Qmin = np.minimum(np.minimum(Qp, Qm), Q0)
-        
-        #Not the least squares estimate, but what is used in AREPO code release
-        grad = (Qp - Qm) / dx
-
-        dQ = grad*(xe[1:] - xc[1:-1])
-        Qp = Q0 + dQ
-
-        pos = Qp > Qmax ; neg = Qp < Qmin
-        phir = np.where(pos, (Qmax - Q0)/dQ, np.where(neg, (Qmin - Q0)/dQ, 1))
-        
-        dQ = grad*(xe[0:-1] - xc[1:-1])
-        Qm = Q0 + dQ
-
-        pos = Qm > Qmax ; neg = Qm < Qmin
-        phil = np.where(pos, (Qmax - Q0)/dQ, np.where(neg, (Qmin - Q0)/dQ, 1))
-
-        alpha = np.maximum(0, np.minimum(1, np.minimum(phir, phil)))
-        grad *= alpha
-        Qm = Q0 + grad*(xe[0:-1] - xc[1:-1])
-        Qp = Q0 + grad*(xe[1:] - xc[1:-1])
-        
-        return Qm, Qp, grad
-
 
 def prim2cons(W):
     U = np.full((len(W), NHYDRO), np.nan) #conserved state vector
@@ -75,15 +24,7 @@ def prim2flux(W):
     return(F)
 
 
-def HLL_solver(WL, WR, mesh_type, fixed_v):
-    #3. Compute velocity corrections
-    if mesh_type == "Lagrangian":
-        vl = WL[:,1]
-        vr = WR[:,1]
-        vf =  0.5 * (vl+vr)
-    elif mesh_type == "fixed":
-        vf = fixed_v
-    
+def HLL_solver(WL, WR, vf):
     # Transform lab-frame to face frame.
     WL[:,1] -= vf       # subtract face velocity from gas velocity
     WR[:,1] -= vf      
@@ -117,15 +58,6 @@ def HLL_solver(WL, WR, mesh_type, fixed_v):
         
     return fHLL_lab
 
-"""_HLLC = HLLC(gamma=GAMMA)
-def HLLC_solver(Wl, Wr):
-    Ul, Ur = prim2cons(Wl), prim2cons(Wr)
-    flux = _HLLC(Ul.T, Ur.T)
-
-    return flux.T
-"""
-
-
 
 """ Solve the equations of hydrodynamics for gas only on a moving grid """
 def solve_euler(Npts, IC, reconstruction, tout, Ca = 0.7,
@@ -157,6 +89,13 @@ def solve_euler(Npts, IC, reconstruction, tout, Ca = 0.7,
         #2. Compute Primitive variables
         Wb = cons2prim(Ub)
         
+        #3. Correct velocities
+        if mesh_type == "Lagrangian":
+            vp = Wb[1:-2,1]
+            vm = Wb[2:-1,1]
+            vf =  0.5 * (vp+vm)
+        elif mesh_type == "fixed":
+            vf = fixed_v
         
         #4. Reconstruct the edge states
         Wp = np.full([U.shape[0]+2,NHYDRO], np.nan)
@@ -166,7 +105,7 @@ def solve_euler(Npts, IC, reconstruction, tout, Ca = 0.7,
             Wm[:,i], Wp[:,i], gradW[:,i] = R.reconstruct(Wb[:,i], xc)
         
         #5. Compute fluxes
-        flux =              HLL_solver(Wp[:-1], Wm[1:], fixed_v = fixed_v, mesh_type=mesh_type)
+        flux =              HLL_solver(Wp[:-1], Wm[1:], vf)
 
         #6. Update Q
         return dt*np.diff(flux, axis=0)/dx.reshape(-1,1), gradW
@@ -178,6 +117,14 @@ def solve_euler(Npts, IC, reconstruction, tout, Ca = 0.7,
         #2. Compute Conserved variables
         U = cons2prim(W)
         
+        #3. Correct velocities
+        if mesh_type == "Lagrangian":
+            vp = Wb[1:-2,1]
+            vm = Wb[2:-1,1]
+            vf =  0.5 * (vp+vm)
+        elif mesh_type == "fixed":
+            vf = fixed_v
+        
         #4. Reconstruct the edge states
         Wp = np.full([U.shape[0]+2,NHYDRO], np.nan)
         Wm = np.full([U.shape[0]+2,NHYDRO], np.nan)
@@ -186,13 +133,14 @@ def solve_euler(Npts, IC, reconstruction, tout, Ca = 0.7,
             Wm[:,i], Wp[:,i], gradW[:,i] = R.reconstruct(Wb[:,i], xc)
         
         #5. Compute fluxes
-        flux =                  HLL_solver(Wp[:-1], Wm[1:], mesh_type, fixed_v)
+        flux =                  HLL_solver(Wp[:-1], Wm[1:], vf)
 
         #6. Update Q
         return dt*np.diff(flux, axis=0)/dx.reshape(-1,1)
 
     
     def time_diff_W(W, gradW):# ###, FB):
+        # TODO: Correct velocities
         dWdt = np.zeros_like(W)
         
         rho_g = W[:, 0]
@@ -234,8 +182,7 @@ def solve_euler(Npts, IC, reconstruction, tout, Ca = 0.7,
             xc = xc + Wb[:,1]*dt
         else:
             xc = xc + fixed_v*dt
-        xc_ng = xc[stencil:-stencil]
-        dx[1:-1] = (xc_ng[2:] - xc_ng[:-2])*0.5
+        dx[1:-1] = (xc_ng[3:-1] - xc_ng[1:-3])*0.5
         dx[0], dx[-1] = dx[1], dx[-2]
         return(xc, dx)
     
@@ -280,60 +227,3 @@ def solve_euler(Npts, IC, reconstruction, tout, Ca = 0.7,
 
     xc = xc[stencil:-stencil]
     return xc, cons2prim(U)
-
-
-
-
-def _test_convergence(IC, pmin=4, pmax=9, figs_evol=None, fig_err=None):
-    N = 2**np.arange(pmin, pmax+1)
-    scheme = Arepo2
-    errs = []
-    c=None
-    label=scheme.__name__
-    for Ni in N:
-        print (scheme.__name__, Ni)
-        _, W0 = solve_euler(Ni, IC, scheme, 0, Ca = 0.4, mesh_type = "Lagrangian", fixed_v = 3.)
-        x, W = solve_euler(Ni, IC, scheme, 3.0, Ca = 0.4, mesh_type = "Lagrangian",fixed_v = 3.)
-        if figs_evol is not None:
-            c = figs_evol[0].plot(x, W[:,0], c=c, 
-                                  label=label)[0].get_color()
-            figs_evol[1].plot(x, W[:,1], c=c)
-            figs_evol[2].plot(x, W[:,2], c=c)
-            
-            figs_evol[0].set_ylabel('Density')
-            figs_evol[1].set_ylabel('Velocity')
-            figs_evol[2].set_ylabel('Pressure')
-            figs_evol[2].set_xlabel('x')
-            
-            label=None
-
-        errs.append(np.sqrt(np.mean((W[:,1] - W0[:,1])**2)))
-    if fig_err is not None:
-        fig_err.loglog(N, errs, c=c, label=scheme.__name__)
-
-    if fig_err is not None:
-        fig_err.set_xlabel('N')
-        fig_err.set_ylabel('L2 velocity error')
-        fig_err.plot(N, 1e-4/N**2, label='1/N^2', c='k')
-        fig_err.legend()
-    if figs_evol is not None:
-        figs_evol[0].legend(loc='best',frameon=False)
-
-def init_wave(xc, cs0=1.0, rho0=1.0, v0=1.0, drho=1e-6):
-    kx = 2*np.pi*xc
-
-    W = np.full([len(xc), NHYDRO], np.nan)
-    W[:,0] = rho0 + drho*np.sin(kx)
-    W[:,1] = v0 + drho*cs0*np.sin(kx)
-    W[:,2] = (rho0*cs0**2/GAMMA) * (W[:,0]/rho0)**GAMMA
-    return W
-
-
-if __name__ == "__main__":
-    import matplotlib.pyplot as plt
-    _test_convergence(init_wave, 
-                      figs_evol=plt.subplots(3, 1)[1],
-                      fig_err=plt.subplots(1)[1])
-
-    plt.show()
-    
