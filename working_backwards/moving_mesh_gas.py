@@ -150,7 +150,9 @@ def solve_euler(Npts, IC, reconstruction, tout, Ca = 0.7,
 
         return Qb
 
-    def update_stage(U, dt, xc):
+    def update_stage(Q, dt, xc, dx):
+        #0. Convert Q -> U
+        U = Q / dx.reshape(-1,1)
         #1. Apply Boundaries
         Ub = boundary(U)
 
@@ -169,7 +171,7 @@ def solve_euler(Npts, IC, reconstruction, tout, Ca = 0.7,
         flux =              HLL_solver(Wp[:-1], Wm[1:], fixed_v = fixed_v, mesh_type=mesh_type)
 
         #6. Update Q
-        return dt*np.diff(flux, axis=0)/dx.reshape(-1,1), gradW
+        return dt*np.diff(flux, axis=0), gradW
     
     def update_stage_prim(W, dt, xc):
         #1. Apply Boundaries
@@ -189,10 +191,15 @@ def solve_euler(Npts, IC, reconstruction, tout, Ca = 0.7,
         flux =                  HLL_solver(Wp[:-1], Wm[1:], mesh_type, fixed_v)
 
         #6. Update Q
-        return dt*np.diff(flux, axis=0)/dx.reshape(-1,1)
+        return dt*np.diff(flux, axis=0)
 
     
     def time_diff_W(W, gradW):# ###, FB):
+        if mesh_type == "Lagrangian":
+            W[:,1] = 0.
+        elif mesh_type == "fixed":
+            W[:,1] -= fixed_v
+        
         dWdt = np.zeros_like(W)
         
         rho_g = W[:, 0]
@@ -245,40 +252,38 @@ def solve_euler(Npts, IC, reconstruction, tout, Ca = 0.7,
     U = prim2cons(W)
 
     t = 0
+    Q = U * dx.reshape(-1,1)
     while t < tout:
         # 1) Find new timestep
+        U = Q / dx.reshape(-1,1)
         dtmax = dt_max_Ca(U)
         dt = min(dtmax, tout-t)
-        if order == 2:
-            # 2) Calculate gradient, 
-            # 3.) compute face velocity (in HLL solver), 
-            # 4.) return flux-updated U
-            F1, gradW1 =      update_stage(U , dt, xc)
-            U1 = U - F1
-            
-            # 5.) TODO: Update mesh
-            xc, dx = update_mesh(xc, dt, W)
-            
-            # 6) Compute predicted prim vars
-            W = cons2prim(U)
-            dWdt = time_diff_W(W, gradW1[1:-1])
-            W1 = W + dWdt*dt
-            
-            # 7) Compute fluxes again
-            Fp = update_stage_prim(W1, dt, xc)
-            
-            # 8) Time average (both used dt, so just *0.5)
-            #U = U - 0.5*(F1+Fp)
-            Fp, gradWp = update_stage(U1, dt, xc)
-            Up = U1 - Fp
-            U  = (U + Up)/2.
-        else:
-            F, grad  = update_stage(U, dt, xc)
-            U = U - F
+        # 2) Calculate gradient, 
+        # 3.) compute face velocity (in HLL solver), 
+        # 4.) return flux-updated U
+        F1, gradW1 =            update_stage(Q, dt, xc, dx)
+        Q1 = Q - F1
         
+        # 5.) TODO: Update mesh
+        xc, dx = update_mesh(xc, dt, W)
+        
+        # 6) Compute predicted prim vars
+        W = cons2prim(Q / dx.reshape(-1,1))
+        dWdt = time_diff_W(W, gradW1[1:-1])
+        W1 = W + dWdt*dt
+        
+        # 7) Compute fluxes again
+        Fp =                    update_stage_prim(W1, dt, xc)
+        
+        # 8) Time average (both used dt, so just *0.5)
+        Q = Q - 0.5*(F1+Fp)
+        #Fp, gradWp =            update_stage(Q1, dt, xc, dx)
+        #Qp = Q1 - Fp
+        #Q  = (Q + Qp)/2.
         t = min(tout, t+dt)
 
     xc = xc[stencil:-stencil]
+    U = Q / dx.reshape(-1,1)
     return xc, cons2prim(U)
 
 

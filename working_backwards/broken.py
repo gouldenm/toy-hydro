@@ -125,7 +125,10 @@ def solve_euler(Npts, IC, tout, Ca = 0.7,
 
         return Qb
 
-    def update_stage(U, dt, xc):
+    def update_stage(Q, dt, xc, dx):
+        #0. Convert conserved to cell conserved...
+        U = Q / dx.reshape(-1,1)
+        
         #1. Apply Boundaries
         Ub = boundary(U)
 
@@ -151,7 +154,7 @@ def solve_euler(Npts, IC, tout, Ca = 0.7,
         flux =              HLL_solver(Wp[:-1], Wm[1:], vf)
 
         #6. Update Q
-        return dt*np.diff(flux, axis=0)/dx.reshape(-1,1), gradW
+        return dt*np.diff(flux, axis=0), gradW
     
     def update_stage_prim(W, dt, xc):
         #1. Apply Boundaries
@@ -179,7 +182,7 @@ def solve_euler(Npts, IC, tout, Ca = 0.7,
         flux =                  HLL_solver(Wp[:-1], Wm[1:], vf)
 
         #6. Update Q
-        return dt*np.diff(flux, axis=0)/dx.reshape(-1,1)
+        return dt*np.diff(flux, axis=0)
 
     
     def time_diff_W(W, gradW):# ###, FB):
@@ -240,12 +243,13 @@ def solve_euler(Npts, IC, tout, Ca = 0.7,
         # 1) Find new timestep
         dtmax = dt_max_Ca(U)
         dt = min(dtmax, tout-t)
+        Q = U * dx.reshape(-1,1)
         if order == 2:
             # 2) Calculate gradient, 
             # 3.) compute face velocity (in HLL solver), 
-            # 4.) return flux-updated U
-            F1, gradW1 =      update_stage(U , dt, xc)
-            U1 = U - F1
+            # 4.) return flux-updated Q
+            F1, gradW1 =      update_stage(Q , dt, xc, dx)
+            Q1 = Q - F1
             
             # 5.) TODO: Update mesh
             xc, dx = update_mesh(xc, dt, W)
@@ -260,9 +264,10 @@ def solve_euler(Npts, IC, tout, Ca = 0.7,
             
             # 8) Time average (both used dt, so just *0.5)
             #U = U - 0.5*(F1+Fp)
-            Fp, gradWp = update_stage(U1, dt, xc)
-            Up = U1 - Fp
-            U  = (U + Up)/2.
+            Fp, gradWp = update_stage(Q1, dt, xc, dx)
+            Qp = Q1 - Fp
+            Q  = (Q + Qp)/2.
+            U = Q / dx.reshape(-1,1)
         else:
             F, grad  = update_stage(U, dt, xc)
             U = U - F
