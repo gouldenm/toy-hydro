@@ -195,11 +195,11 @@ def solve_euler(Npts, IC, reconstruction, tout, Ca = 0.7,
 
     
     def time_diff_W(W, gradW):# ###, FB):
-        if mesh_type == "Lagrangian":
+        """if mesh_type == "Lagrangian":
             W[:,1] = 0.
         elif mesh_type == "fixed":
             W[:,1] -= fixed_v
-        
+        """
         dWdt = np.zeros_like(W)
         
         rho_g = W[:, 0]
@@ -297,8 +297,8 @@ def _test_convergence(IC, pmin=4, pmax=9, figs_evol=None, fig_err=None):
     label=scheme.__name__
     for Ni in N:
         print (scheme.__name__, Ni)
-        _, W0 = solve_euler(Ni, IC, scheme, 0, Ca = 0.4, mesh_type = "Lagrangian", fixed_v = 3.)
-        x, W = solve_euler(Ni, IC, scheme, 3.0, Ca = 0.4, mesh_type = "Lagrangian",fixed_v = 3.)
+        _, W0 = solve_euler(Ni, IC, scheme, 0, Ca = 0.4, mesh_type = "fixed", fixed_v = 3.)
+        x, W = solve_euler(Ni, IC, scheme, 3.0, Ca = 0.4, mesh_type = "fixed",fixed_v = 3.)
         if figs_evol is not None:
             c = figs_evol[0].plot(x, W[:,0], c=c, 
                                   label=label)[0].get_color()
