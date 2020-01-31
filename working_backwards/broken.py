@@ -2,7 +2,7 @@ from __future__ import print_function
 import numpy as np
 
 GAMMA = 5/3.
-NHYDRO = 3
+NHYDRO = 5
 
 class Arepo2(object):
     """Second-order reconstruction as in AREPO."""
@@ -56,6 +56,8 @@ def prim2cons(W):
     U[:,0] = W[:,0] #gas density
     U[:,1] = W[:,0]*W[:,1] #gas momentum
     U[:,2] = W[:,2]/(GAMMA-1) + (W[:,0]*W[:,1]**2)/2    #gas energy
+    U[:,3] = W[:,3]                                        #dust density
+    U[:,4] = W[:,3]*W[:,4]                             #dust momentum
     return(U)
     
 def cons2prim(U):
@@ -63,6 +65,8 @@ def cons2prim(U):
     W[:,0] = U[:,0] #gas density
     W[:,1] = U[:,1]/U[:,0] #gas velocity
     W[:,2] = (GAMMA-1)*(U[:,2] - (U[:,1]**2/U[:,0])/2)  #gas pressure
+    W[:,3] = U[:,3]                                     #dust density
+    W[:,4] = U[:,4]/U[:,3]                             #dust velocity
     return(W)
     
 def prim2flux(W):
@@ -70,6 +74,8 @@ def prim2flux(W):
     F[:,0] = W[:,0]*W[:,1] #mass flux
     F[:,1] = W[:,0]*W[:,1]**2 + W[:,2] #momentum flux
     F[:,2] = W[:,1] * (W[:,2]/(GAMMA-1) + (W[:,0]*W[:,1]**2)/2 + W[:,2]) #energy flux
+    F[:,3] = W[:,3]*W[:,4]                                                  #dust mass flux
+    F[:,4] = W[:,3]*W[:,4]**2                                              #dust momentum flux
     return(F)
 
 
@@ -88,19 +94,39 @@ def HLL_solver(WL, WR, vf):
 
     
     # HLL central state in face frame
-    fHLL = (Sp*fL - Sm*fR + Sp*Sm*(UR - UL)) / (Sp - Sm)
+    fHLL = np.zeros_like(fL)
+    fHLL[:,:3] = (Sp*fL[:,:3] - Sm*fR[:,:3] + Sp*Sm*(UR [:,:3]- UL[:,:3])) / (Sp - Sm)
 
     # Left / Right states
     indexL = Sm.reshape(-1) >= 0
     indexR = Sp.reshape(-1) <= 0
-    fHLL[indexL] = fL[indexL]
-    fHLL[indexR] = fR[indexR]
+    fHLL[indexL,:3] = fL[indexL,:3]
+    fHLL[indexR,:3] = fR[indexR,:3]
+    
+    # ### ### ### DUST ### ### ###
+    #    Calculate signal speed for dust
+    ld = (np.sqrt(WL[:,3])*WL[:,4] + np.sqrt(WR[:,3])*WR[:,4]) / (np.sqrt(WL[:,3]) + np.sqrt(WR[:,3]))
+    
+    #   Calculate DUST flux in frame of face (note if vL < 0 < vR, then fHLL = 0.)
+    indexL = (ld > 1e-15) & np.logical_not(((WL[:,4] < 0) & (WR[:,4] > 0)))
+    indexC = (np.abs(ld) < 1e-15 ) & np.logical_not(((WL[:,4] < 0) & (WR[:,4] > 0)))
+    indexR = (ld < -1e-15) & np.logical_not(((WL[:,4] < 0) & (WR[:,4] > 0)))
+    fHLL[indexL,3:] = fL[indexL,3:]
+    fHLL[indexC,3:] = (fL[indexC,3:] + fR[indexC,3:])/2.
+    fHLL[indexR,3:] = fR[indexR,3:]
+    
+    w_f = ld.reshape(-1,1)
+    f_dust = w_f*np.where(w_f > 0, UL[:,3:], UR[:,3:]) 
+    
+    fHLL[:, 3:] = f_dust
+    
     
     # Correct to lab frame
     fHLL_lab = np.copy(fHLL)
     fHLL_lab[:,1] += fHLL[:,0]*vf
     fHLL_lab[:,2] += 0.5*fHLL[:,0]*vf**2 + fHLL[:,1]*vf
-        
+    fHLL_lab[:,4] += fHLL[:,3]*vf
+    
     return fHLL_lab
 
 """_HLLC = HLLC(gamma=GAMMA)
@@ -119,7 +145,8 @@ def max_wave_speed(U):
 
 
 
-def solve_euler(Npts, IC, reconstruction, tout, Ca = 0.7, fixed_v = 0.0, mesh_type = "fixed"):
+def solve_euler(Npts, IC, reconstruction, tout, Ca = 0.7, fixed_v = 0.0, mesh_type = "fixed", 
+                K=0.1, dust_scheme = "explicit", FB=0):
     """Test schemes using an Explicit TVD RK integration"""
     # Setup up the grid
     stencil = reconstruction.STENCIL
@@ -167,7 +194,9 @@ def solve_euler(Npts, IC, reconstruction, tout, Ca = 0.7, fixed_v = 0.0, mesh_ty
         
         #5. Transform lab-frame to face frame.
         WL[:,1] -= vf       # subtract face velocity from gas velocity
-        WR[:,1] -= vf 
+        WR[:,1] -= vf
+        WL[:,4] -= vf
+        WR[:,4] -= vf
         #5. Compute fluxes
         flux =              HLL_solver(WL, WR, vf)
 
@@ -201,6 +230,8 @@ def solve_euler(Npts, IC, reconstruction, tout, Ca = 0.7, fixed_v = 0.0, mesh_ty
         #5. Transform lab-frame to face frame.
         WL[:,1] -= vf       # subtract face velocity from gas velocity
         WR[:,1] -= vf 
+        WL[:,4] -= vf
+        WR[:,4] -= vf
         
         #Include also time correction:
         WL += dWdtL*dt
@@ -214,6 +245,7 @@ def solve_euler(Npts, IC, reconstruction, tout, Ca = 0.7, fixed_v = 0.0, mesh_ty
     
     def time_diff_W(W, gradW, vf):# ###, FB):
         W[:,1] -= vf
+        W[:,4] -= vf
         dWdt = np.zeros_like(W)
         
         rho_g = W[:, 0]
@@ -225,20 +257,31 @@ def solve_euler(Npts, IC, reconstruction, tout, Ca = 0.7, fixed_v = 0.0, mesh_ty
         P = W[:, 2]
         grad_P = gradW[:, 2]
         
-        """
-        rho_d = W[:, self.i_rho_d]
-        grad_rho_d = gradW[:, self.i_rho_d]
         
-        v_d = W[:, self.i_p_d]
-        grad_v_d = gradW[:, self.i_p_d]
-        """
+        rho_d = W[:, 3]
+        grad_rho_d = gradW[:, 3]
+        
+        v_d = W[:, 4]
+        grad_v_d = gradW[:, 4]
+        
         dWdt[:,0] = v_g*grad_rho_g + rho_g*grad_v_g
         dWdt[:,1] = grad_P/rho_g + v_g*grad_v_g # ###+ FB*( - self.K*rho_d*v_d + self.K*rho_d*v_g)
         dWdt[:,2] = GAMMA*P*grad_v_g + v_g * grad_P
-        """dWdt[:,self.i_rho_d] =  v_d*grad_rho_d + rho_d*grad_v_d
-        dWdt[:,self.i_p_d] = v_d*grad_v_d + self.K*rho_g*v_d - self.K*rho_g*v_g"""
+        dWdt[:,3] =  v_d*grad_rho_d + rho_d*grad_v_d
+        dWdt[:,4] = v_d*grad_v_d + K*rho_g*v_d - K*rho_g*v_g
         dWdt *= -1
         return(dWdt)
+    
+    def update_mesh(xc, dt, W):
+    #  Modify x coordinate based on velocity of cell centre
+        if mesh_type == "Lagrangian":
+            Wb = boundary(W)
+            xc = xc + Wb[:,1]*dt
+        else:
+            xc = xc + fixed_v*dt
+        xc_ng = xc[stencil:-stencil]
+        dx = (xc[2:] - xc[:-2])*0.5
+        return(xc, dx)
     
     # Set the initial conditions
     W = IC(xc[stencil:-stencil])
@@ -256,9 +299,7 @@ def solve_euler(Npts, IC, reconstruction, tout, Ca = 0.7, fixed_v = 0.0, mesh_ty
         # 4.) return flux-updated U
         F1, gradW1 =                        update_stage(U , dt, xc)
         
-        # 5.) TODO: Update mesh
-        
-        # 6) Compute predicted dWdt for both sides (requires FACE velocity, so can't do both sides at once)
+        # 5) Compute predicted dWdt for both sides (requires FACE velocity, so can't do both sides at once)
         W = cons2prim(U)
         Wb = boundary(W)[1:-1]#match gradient extent
         WL = np.copy(Wb[:-1]); WR = np.copy(Wb[1:])
@@ -272,22 +313,40 @@ def solve_euler(Npts, IC, reconstruction, tout, Ca = 0.7, fixed_v = 0.0, mesh_ty
         dWdtL = time_diff_W(WL, gradW1[:-1], vf)
         dWdtR = time_diff_W(WR, gradW1[1:], vf)
         
+        
+        # 6.) Update mesh
+        xc, dx = update_mesh(xc, dt, W)
+        
         # 7) Compute fluxes again
         Fp =                                update_stage_prim(W, dWdtL, dWdtR, dt, xc)
         
-        # 8) Time average (both used dt, so just *0.5)
-        Q = Q - 0.5*(F1+Fp)
+        # 8) Time average fluxes (both used dt, so just *0.5)
+        Qold = np.copy(Q)
+        flux = 0.5*(F1+Fp)
+        
+        Q[:,:4] = Qold[:,:4] - flux[:,:4]
+        
+        p_g = Qold[:,2]
+        p_d = Qold[:,4]
+        rho_g = Q[:,0] / dx[1:-1]
+        rho_d = Q[:,3] / dx[1:-1]
+        
+        if dust_scheme == "explicit":
+            Q[:,4] = (p_d - flux[:,4] + K*rho_d*dt*p_g)   /    (1 + K*rho_g*dt)
+            
         U = Q/dx[1:-1].reshape(-1,1)
-        #Fp, gradWp = update_stage(U1, dt)
-        #Up = U1 - Fp
-        #U  = (U + Up)/2.
+        
     
         t = min(tout, t+dt)
 
     xc = xc[stencil:-stencil]
     return xc, cons2prim(U)
-                
-def _test_convergence(IC, pmin=4, pmax=9, figs_evol=None, fig_err=None):
+
+
+
+
+
+def _test_convergence(IC, pmin=4, pmax=10, figs_evol=None, fig_err=None):
     N = 2**np.arange(pmin, pmax+1)
     scheme = Arepo2
     errs = []
@@ -295,8 +354,8 @@ def _test_convergence(IC, pmin=4, pmax=9, figs_evol=None, fig_err=None):
     label=scheme.__name__
     for Ni in N:
         print (scheme.__name__, Ni)
-        _, W0 = solve_euler(Ni, IC, scheme, 0, Ca = 0.4, fixed_v = 5.0)
-        x, W = solve_euler(Ni, IC, scheme, 3.0, Ca = 0.4, fixed_v = 5.0)
+        _, W0 = solve_euler(Ni, IC, scheme, 0, Ca = 0.4, mesh_type = "Lagrangian",  fixed_v = 5.0, FB=0)
+        x, W = solve_euler(Ni, IC, scheme, 3.0, Ca = 0.4, mesh_type = "Lagrangian", fixed_v = 5.0, FB=0)
         if figs_evol is not None:
             c = figs_evol[0].plot(x, W[:,0], c=c, 
                                   label=label)[0].get_color()
