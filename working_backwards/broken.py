@@ -115,7 +115,10 @@ def max_wave_speed(U):
     W = cons2prim(U)
     return np.max(np.abs(W[:,1]) + np.sqrt(GAMMA*W[:,2]/W[:,0]))
 
-        
+
+
+
+
 def solve_euler(Npts, IC, reconstruction, tout, Ca = 0.7, fixed_v = 0.0, mesh_type = "fixed"):
     """Test schemes using an Explicit TVD RK integration"""
     # Setup up the grid
@@ -123,8 +126,9 @@ def solve_euler(Npts, IC, reconstruction, tout, Ca = 0.7, fixed_v = 0.0, mesh_ty
     order = reconstruction.ORDER
     
     shape = Npts + 2*stencil
-    dx = 1. / Npts
-    xc = np.linspace(-dx*stencil + dx*0.5, 1+ dx*stencil - dx*0.5, shape)
+    dx0 = 1. / Npts
+    xc = np.linspace(-dx0*stencil + dx0*0.5, 1+ dx0*stencil - dx0*0.5, shape)
+    dx = (xc[2:] - xc[:-2])*0.5
     
     # Reconstruction function:
     R = reconstruction(xc, 0)
@@ -239,12 +243,12 @@ def solve_euler(Npts, IC, reconstruction, tout, Ca = 0.7, fixed_v = 0.0, mesh_ty
     # Set the initial conditions
     W = IC(xc[stencil:-stencil])
     U = prim2cons(W)
-    Q = U * dx
+    Q = U * dx[1:-1].reshape(-1,1)
 
     t = 0
     while t < tout:
         # 1) Calculate new timestep
-        dtmax = Ca * dx / max_wave_speed(U)
+        dtmax = Ca * min(dx) / max_wave_speed(U)
         dt = min(dtmax, tout-t)
         
         # 2) Assign face velocities to W
@@ -273,7 +277,7 @@ def solve_euler(Npts, IC, reconstruction, tout, Ca = 0.7, fixed_v = 0.0, mesh_ty
         
         # 8) Time average (both used dt, so just *0.5)
         Q = Q - 0.5*(F1+Fp)
-        U = Q/dx
+        U = Q/dx[1:-1].reshape(-1,1)
         #Fp, gradWp = update_stage(U1, dt)
         #Up = U1 - Fp
         #U  = (U + Up)/2.
