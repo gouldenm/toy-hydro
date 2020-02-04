@@ -29,15 +29,15 @@ class Arepo2(object):
         Qmin = np.minimum(np.minimum(Qp, Qm), Q0)
         
         #Not the least squares estimate, but what is used in AREPO code release
-        grad = (Qp - Qm) / dx
+        grad = (Qp - Qm) / dx.reshape(-1,1)
 
-        dQ = grad*(xe[1:] - xc[1:-1])
+        dQ = grad*(xe[1:] - xc[1:-1]).reshape(-1,1)
         Qp = Q0 + dQ
 
         pos = Qp > Qmax ; neg = Qp < Qmin
         phir = np.where(pos, (Qmax - Q0)/dQ, np.where(neg, (Qmin - Q0)/dQ, 1))
         
-        dQ = grad*(xe[0:-1] - xc[1:-1])
+        dQ = grad*(xe[0:-1] - xc[1:-1]).reshape(-1,1)
         Qm = Q0 + dQ
 
         pos = Qm > Qmax ; neg = Qm < Qmin
@@ -45,10 +45,8 @@ class Arepo2(object):
 
         alpha = np.maximum(0, np.minimum(1, np.minimum(phir, phil)))
         grad *= alpha
-        Qm = Q0 + grad*(xe[0:-1] - xc[1:-1])
-        Qp = Q0 + grad*(xe[1:] - xc[1:-1])
         
-        return Qm, Qp, grad
+        return grad
 
 
 def prim2cons(W):
@@ -80,12 +78,6 @@ def prim2flux(W):
 
 
 def HLL_solver(WL, WR, vf):
-    #5. Transform lab-frame to face frame.
-    WL[:,1] -= vf       # subtract face velocity from gas velocity
-    WR[:,1] -= vf 
-    WL[:,4] -= vf
-    WR[:,4] -= vf
-        
     UL = prim2cons(WL)
     UR = prim2cons(WR)
     
@@ -182,12 +174,11 @@ def solve_euler(Npts, IC, reconstruction, tout, Ca = 0.7, fixed_v = 0.0, mesh_ty
         Wb = cons2prim(Ub)
 
         #3. Reconstruct the edge states
-        Wp = np.full([U.shape[0]+2,NHYDRO], np.nan)
-        Wm = np.full([U.shape[0]+2,NHYDRO], np.nan)
-        gradW = np.full([U.shape[0]+2,NHYDRO], np.nan)
-        for i in range(NHYDRO):
-            Wm[:,i], Wp[:,i], gradW[:,i] = R.reconstruct(Wb[:,i], xcin)
+        gradW = R.reconstruct(Wb, xcin)
         
+        xe = 0.5*(xc[1:] + xc[:-1])
+        Wm = Wb[1:-1] + gradW*(xe[0:-1] - xc[1:-1]).reshape(-1,1)
+        Wp = Wb[1:-1] + gradW*(xe[1:] - xc[1:-1]).reshape(-1,1)
         WL = Wp[:-1]; WR = Wm[1:]
         
         #4. Correct velocities
@@ -209,35 +200,32 @@ def solve_euler(Npts, IC, reconstruction, tout, Ca = 0.7, fixed_v = 0.0, mesh_ty
         #6. Return flux
         return dt*np.diff(flux, axis=0), gradW
     
-    def update_stage_prim(W, dWdtL, dWdtR, dt, xcin):
+    def update_stage_prim(W, dWdt, gradW, dt, xcin, vf):
         #1. Apply Boundaries
         Wb = boundary(W)
-
+        
+        #Include time correction
+        Wb[1:-1] += dWdt*dt
+        
         #2. Compute Conserved variables
         U = cons2prim(W)
 
         #3. Reconstruct the edge states
-        Wp = np.full([U.shape[0]+2,NHYDRO], np.nan)
-        Wm = np.full([U.shape[0]+2,NHYDRO], np.nan)
-        gradW = np.full([U.shape[0]+2,NHYDRO], np.nan)
-        for i in range(NHYDRO):
-            Wm[:,i], Wp[:,i], gradW[:,i] = R.reconstruct(Wb[:,i], xcin)
+        #gradW = R.reconstruct(Wb, xcin)
+        
+        xe = 0.5*(xc[1:] + xc[:-1])
+        Wm = Wb[1:-1] + gradW*(xe[0:-1] - xc[1:-1]).reshape(-1,1)
+        Wp = Wb[1:-1] + gradW*(xe[1:] - xc[1:-1]).reshape(-1,1)
+        WL = Wp[:-1]; WR = Wm[1:]
         
         WL = Wp[:-1]; WR = Wm[1:]
         
-        #4. Correct velocities
-        if mesh_type == "Lagrangian":
-            vl = WL[:,1]
-            vr = WR[:,1]
-            vf =  0.5 * (vl+vr)
-        elif mesh_type == "fixed":
-            vf = fixed_v
+        #5. Transform lab-frame to face frame.
+        WL[:,1] -= vf       # subtract face velocity from gas velocity
+        WR[:,1] -= vf 
+        WL[:,4] -= vf
+        WR[:,4] -= vf
         
-        
-        
-        #Include also time correction:
-        WL += dWdtL*dt
-        WR += dWdtR*dt
         #4. Compute fluxes
         flux =                  HLL_solver(Wp[:-1], Wm[1:], vf)
 
@@ -292,61 +280,40 @@ def solve_euler(Npts, IC, reconstruction, tout, Ca = 0.7, fixed_v = 0.0, mesh_ty
 
     t = 0
     while t < tout:
-        # 0. Calculate new timestep
+        # 1) Calculate new timestep
         dtmax = Ca * min(dx) / max_wave_speed(U)
         dt = min(dtmax, tout-t)
         
-        # 1. Apply boundaries
-        Qb = boundary(xc, Q)
-        
-        #2. Compute prim variables
-        Ub = Qb / dx[1:-1].reshape(-1,1)
-        Wb = cons2prim(Ub)
-        
-        #3. Compute gradient
-        Wp = np.full([U.shape[0]+2,NHYDRO], np.nan)
-        Wm = np.full([U.shape[0]+2,NHYDRO], np.nan)
-        gradW = np.full([U.shape[0]+2,NHYDRO], np.nan)
-        for i in range(NHYDRO):
-            Wm[:,i], Wp[:,i], gradW[:,i] = R.reconstruct(Wb[:,i], xcin)
-        
-        #4. Compute state at cell edges
-        WL = Wp[:-1]; WR = Wm[1:]
-        
-        #5. Set interface velocities TODO: compare this with how velocities are got in broken.py
-        if mesh_type == "Lagrangian":
-            vl = WL[:,1]
-            vr = WR[:,1]
-            vf =  0.5 * (vl+vr)
-        elif mesh_type == "fixed":
-            vf = fixed_v
-        
-        #6. Compute flux at t
-        
+        # 2) Assign face velocities to W
+        # 3) Calculate gradient (NB gradient can be got before / after velocity shift, no problem)
+        # 4.) return flux-updated U
         F1, gradW1 =                        update_stage(U , dt, xc)
         
         # 5) Compute predicted dWdt for both sides (requires FACE velocity, so can't do both sides at once)
         W = cons2prim(U)
         Wb = boundary(W)[1:-1]#match gradient extent
         WL = np.copy(Wb[:-1]); WR = np.copy(Wb[1:])
+        
+        # Correct velocities:
         if mesh_type == "Lagrangian":
             vl = WL[:,1]
             vr = WR[:,1]
             vf =  0.5 * (vl+vr)
+            vc = Wb[:,1]
         elif mesh_type == "fixed":
-            vl = fixed_v
-            vr = fixed_v
             vf = fixed_v
-            
-        dWdtL = time_diff_W(WL, gradW1[:-1], vl)
-        dWdtR = time_diff_W(WR, gradW1[1:], vr)
+            vc = np.full_like(Wb[:,1], fixed_v)
+        
+        dWdt = time_diff_W(Wb, gradW1, vc)
+        dWdtL = dWdt[:-1]
+        dWdtR = dWdt[1:]
         
         
         # 6.) Update mesh
         xc, dx = update_mesh(xc, dt, W)
         
         # 7) Compute fluxes again
-        Fp =                                update_stage_prim(W, dWdtL, dWdtR, dt, xc)
+        Fp =                                update_stage_prim(W, dWdt, gradW1, dt, xc, vf)
         
         # 8) Time average fluxes (both used dt, so just *0.5)
         Qold = np.copy(Q)
