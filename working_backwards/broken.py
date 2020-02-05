@@ -2,10 +2,10 @@ from __future__ import print_function
 import numpy as np
 from dustywave_sol2 import *
 
-GAMMA = 1.0001
+GAMMA = 5./3
 NHYDRO = 5
 FB = 1
-K=1.0
+K=0.1
 
 class Arepo2(object):
     """Second-order reconstruction as in AREPO."""
@@ -56,7 +56,7 @@ def prim2cons(W):
     U = np.full((len(W), NHYDRO), np.nan) #conserved state vector
     U[:,0] = W[:,0] #gas density
     U[:,1] = W[:,0]*W[:,1] #gas momentum
-    U[:,2] = W[:,2]/(GAMMA-1) + (W[:,0]*W[:,1]**2)/2    #gas energy
+    U[:,2] = W[:,2]/(GAMMA-1) + (W[:,0]*W[:,1]**2)/2.    + FB*(W[:,3]*W[:,4]**2)/2.   #gas energy + dust KE
     U[:,3] = W[:,3]                                        #dust density
     U[:,4] = W[:,3]*W[:,4]                             #dust momentum
     return(U)
@@ -65,7 +65,7 @@ def cons2prim(U):
     W = np.full((len(U), NHYDRO), np.nan) #primitive state vector
     W[:,0] = U[:,0] #gas density
     W[:,1] = U[:,1]/U[:,0] #gas velocity
-    W[:,2] = (GAMMA-1)*(U[:,2] - (U[:,1]**2/U[:,0])/2)  #gas pressure
+    W[:,2] = (GAMMA-1)*(U[:,2] - (U[:,1]**2/U[:,0])/2.   - FB*(U[:,4]**2/U[:,3])/2. )  #gas pressure
     W[:,3] = U[:,3]                                     #dust density
     W[:,4] = U[:,4]/U[:,3]                             #dust velocity
     return(W)
@@ -74,7 +74,8 @@ def prim2flux(W):
     F = np.full((len(W), NHYDRO), np.nan)
     F[:,0] = W[:,0]*W[:,1] #mass flux
     F[:,1] = W[:,0]*W[:,1]**2 + W[:,2] #momentum flux
-    F[:,2] = W[:,1] * (W[:,2]/(GAMMA-1) + (W[:,0]*W[:,1]**2)/2 + W[:,2]) #energy flux
+    F[:,2] = W[:,1] * (W[:,2]/(GAMMA-1) + (W[:,0]*W[:,1]**2)/2 + W[:,2]) \
+             +  FB* W[:,4] * (W[:,3]*W[:,4]**2)/2.                 #gas energy flux + dust energy flux
     F[:,3] = W[:,3]*W[:,4]                                                  #dust mass flux
     F[:,4] = W[:,3]*W[:,4]**2                                              #dust momentum flux
     return(F)
@@ -133,7 +134,7 @@ def HLL_solver(WLin, WRin, vf):
     # Correct to lab frame
     fHLL_lab = np.copy(fHLL)
     fHLL_lab[:,1] += fHLL[:,0]*vf
-    fHLL_lab[:,2] += 0.5*fHLL[:,0]*vf**2 + fHLL[:,1]*vf
+    fHLL_lab[:,2] += 0.5*(fHLL[:,0] + FB*fHLL[:,3])*vf**2 + (fHLL[:,1]+FB*fHLL[:,4])*vf
     fHLL_lab[:,4] += fHLL[:,3]*vf
     
     return fHLL_lab
@@ -340,8 +341,8 @@ def _test_convergence(IC, pmin=4, pmax=10, figs_evol=None, fig_err=None, t_final
     label=scheme.__name__
     for Ni in N:
         print (scheme.__name__, Ni)
-        _, W0 = solve_euler(Ni, IC, scheme, 0, Ca = 0.4, mesh_type = "Lagrangian",  fixed_v = 0.0)
-        x, W = solve_euler(Ni, IC, scheme, t_final, Ca = 0.4, mesh_type = "Lagrangian", fixed_v = 0.0)
+        _, W0 = solve_euler(Ni, IC, scheme, 0, Ca = 0.4, mesh_type = "Lagrangian",  fixed_v = 1.0)
+        x, W = solve_euler(Ni, IC, scheme, t_final, Ca = 0.4, mesh_type = "Lagrangian", fixed_v = 1.0)
         true = IC(x, t=t_final)
         if figs_evol is not None:
             c = figs_evol[0].plot(x, W[:,0], c=c, 
