@@ -4,8 +4,8 @@ from dustywave_sol2 import *
 
 GAMMA = 5./3
 NHYDRO = 5
-FB = 1
-K=0.1
+FB = 0
+K=10.0
 
 class Arepo2(object):
     """Second-order reconstruction as in AREPO."""
@@ -173,6 +173,7 @@ def solve_euler(Npts, IC, tout, Ca = 0.5, fixed_v = 0.0, mesh_type = "fixed",
     # Reconstruction function:
     R = reconstruction(xc, 0)
     
+    
     def boundary(Q):
         if b_type == "periodic":
             Qb = np.empty([shape, NHYDRO])
@@ -183,12 +184,32 @@ def solve_euler(Npts, IC, tout, Ca = 0.5, fixed_v = 0.0, mesh_type = "fixed",
         elif b_type == "reflecting":
             Qb = np.empty([shape, NHYDRO])
             Qb[stencil:-stencil] = Q
-            Qb[ :stencil] = np.flip(Qb[stencil:2*stencil], axis=0)
-            Qb[-stencil:] = np.flip(Qb[Npts:Npts+stencil], axis=0)
-            Qb[ :stencil, 1] = -1*np.flip(Qb[stencil:2*stencil, 1], axis=0)
-            Qb[-stencil:, 1] = -1*np.flip(Qb[Npts:Npts+stencil, 1], axis=0)
-            Qb[ :stencil, 4] = -1*np.flip(Qb[stencil:2*stencil, 4], axis=0)
-            Qb[-stencil:, 4] = -1*np.flip(Qb[Npts:Npts+stencil, 4], axis=0)
+            Qb[0] = Qb[3]
+            Qb[1] = Qb[2]
+            Qb[-1] = Qb[-4]
+            Qb[-2] = Qb[-3]
+            
+            #flip signs for velocities
+            Qb[0,1] = - Qb[3,1]
+            Qb[1,1] = - Qb[2,1]
+            Qb[-1,1] = - Qb[-4,1]
+            Qb[-2,1] = - Qb[-3,1]
+            
+            #Qb[0,4] = - Qb[3,4]
+            #Qb[1,4] = - Qb[2,4]
+            #Qb[-1,4] = - Qb[-4,4]
+            #Qb[-2,4] = - Qb[-3,4]
+            
+        
+        elif b_type == "flow":
+            Qb = np.empty([shape, NHYDRO])
+            Qb[stencil:-stencil] = Q
+            Qb[0] = Qb[2]
+            Qb[1] = Qb[2]
+            Qb[-2] = Qb[-3]
+            Qb[-1] = Qb[-3]
+        
+        #print(Qb)
         return Qb
 
     
@@ -232,7 +253,7 @@ def solve_euler(Npts, IC, tout, Ca = 0.5, fixed_v = 0.0, mesh_type = "fixed",
         return(xc, dx)
     
     # Set the initial conditions
-    W = IC(xc[stencil:-stencil], dust_gas_ratio)
+    W = IC(xc[stencil:-stencil], dust_gas_ratio= dust_gas_ratio, gravity=gravity)
     U = prim2cons(W)
     Q = U * dx[1:-1].reshape(-1,1)
     t = 0
@@ -287,13 +308,12 @@ def solve_euler(Npts, IC, tout, Ca = 0.5, fixed_v = 0.0, mesh_type = "fixed",
         rho_d = Ws[:, 3]
         rho_g = Ws[:, 0]
         Ws[:,1] += FB*K*rho_d*(Ws[:, 4] - Ws[:, 1])*dt
-        Ws[:,4] -=    K*rho_g*(Ws[:, 4] - Ws[:, 1])*dt       #dust
+        #Ws[:,4] -=    K*rho_g*(Ws[:, 4] - Ws[:, 1])*dt       #dust
         Ws += dWdt*dt
         
         #7e. Include constant gravity term, if applicable
         Ws[:,1] += gravity*dt #either 0.0 or 1.0
         Ws[:,4] += gravity*dt
-
         #7f. Reconstruct the edge states        
         xe = 0.5*(xc[1:] + xc[:-1])
         Wm = Ws + gradW*(xe[0:-1] - xc[1:-1]).reshape(-1,1)
@@ -333,14 +353,13 @@ def solve_euler(Npts, IC, tout, Ca = 0.5, fixed_v = 0.0, mesh_type = "fixed",
         Q[:,1] += FB*dp
         
         # Include const gravity term
-        #Q[:,4] += gravity*dt*Q[:,3]
-        #Q[:,1] += gravity*dt*Q[:,0]
+        Q[:,4] += gravity*dt*Q[:,3]
+        Q[:,1] += gravity*dt*Q[:,0]
         
         #12. Update U
         U = Q/dx[1:-1].reshape(-1,1)
     
         t = min(tout, t+dt)
-
     xc = xc[stencil:-stencil]
     return xc, cons2prim(U)
 
@@ -428,7 +447,7 @@ def init_wave(xc, cs0=1.0, rho0=1.0, v0=1.0, drho=1e-6, t=0, dust_gas_ratio = 1.
         W[:,4] = v0 + sol.v_dust(x)
     return W
 
-def init_sod(xc, dust_gas_ratio = 1.0):
+def init_sod(xc, dust_gas_ratio = 1.0, gravity=0.0):
     Pl = 1.0
     Pr = 0.1
     rhol = 1.0
@@ -453,18 +472,18 @@ def init_sod(xc, dust_gas_ratio = 1.0):
     W[:,4] = W[:,1]
     return(W)
 
-def _test_sod(Nx=256, t_final=0.1):
+def _test_sod(Nx=256, t_final=0.1, gravity=0.0):
     IC = init_sod
     
     f, subs = plt.subplots(5, 1)
     plt.suptitle("Dustyshock test")
     
     xL, WL = solve_euler(Nx, IC, t_final, Ca=0.4, 
-                         mesh_type = "Lagrangian", fixed_v = 0.0, b_type="reflecting")
+                         mesh_type = "Lagrangian", fixed_v = 0.0, b_type="flow")
     xF, WF = solve_euler(Nx, IC, t_final, Ca=0.4, 
-                         mesh_type= "Fixed", fixed_v=0.0, b_type="reflecting")
+                         mesh_type= "Fixed", fixed_v=0.0, b_type="flow")
     xI, WI = solve_euler(Nx, IC, 0.0, Ca=0.4, 
-                         mesh_type = "Fixed", fixed_v=0.0, b_type="reflecting")
+                         mesh_type = "Fixed", fixed_v=0.0, b_type="flow")
     
     for i in range(0,5):
         subs[i].plot(xL, WL[:,i], c="b", label="Lagrangian")
@@ -488,7 +507,7 @@ def _test_sod(Nx=256, t_final=0.1):
     subs[4].set_xlim(0, 0.5)"""
 
 
-def init_dustybox(xc, dust_gas_ratio = 1.0):
+def init_dustybox(xc, dust_gas_ratio = 1.0, gravity=0.0):
     W = np.full([len(xc), NHYDRO], np.nan)
     P = 1.0
     rho_g = 1.0
@@ -580,6 +599,62 @@ def _test_dustybox_convergence(pmin = 4, pmax=10, t_final=1.0):
     plt.xscale("log")
 
 
+def init_const_gravity(xc, dust_gas_ratio=1.0, gravity=-1.0):
+    W = np.full([len(xc), NHYDRO], np.nan)
+    H = (gravity*GAMMA)
+    P_0 = 1.0/GAMMA
+    rho_0 = P_0*GAMMA
+    
+    rho_g = rho_0*np.exp(xc*H)
+    P = P_0*np.exp(xc*H)
+    v_g=0
+    v_d=0
+    #insert rho dust in as a constant, since gas is in equilibrium already.
+    rho_d = rho_0*np.exp(xc*H)[-1]*dust_gas_ratio
+    
+    W[:,0] = rho_g
+    W[:,1] = v_g
+    W[:,2] = P
+    W[:,3] = rho_d
+    W[:,4] = v_d
+    
+    return(W)
+
+
+def _test_const_gravity(t_final=1.0, Nx=256, gravity=-1.0, dust_gas_ratio=1.0, Ca=0.4):
+    IC = init_const_gravity
+    f, subs = plt.subplots(5, 1)
+    
+    xI, WI = solve_euler(Nx, IC, 0, Ca=Ca,
+                         mesh_type="fixed", b_type = "reflecting",
+                         dust_gas_ratio= dust_gas_ratio, gravity = gravity)
+    
+    for t in [0.5, 1.0, 2.0, 3.0, 5.0, 10.0]:
+        x, W = solve_euler(Nx, IC, t, Ca=Ca, 
+                           mesh_type = "fixed", b_type = "reflecting",
+                           dust_gas_ratio = dust_gas_ratio, gravity=gravity)
+        for i in range(0,5):
+            subs[i].plot(x, W[:,i], label=str(t))
+    
+    #   Plot IC 
+    #for i in range(0,5):
+    #    subs[i].plot(xI, WI[:,i], c="k", label="IC")
+        
+    #   Compute terminal velocity of dust
+    v_terminal = gravity / (K * WI[:,0])
+    subs[4].plot(xI, v_terminal, c = "k", ls="--", label="terminal velocity")
+    
+    subs[0].set_ylabel('Density')
+    subs[1].set_ylabel('Velocity')
+    subs[2].set_ylabel('Pressure')
+    subs[3].set_ylabel('Dust Density')
+    subs[4].set_ylabel('Dust Velocity')
+    
+    subs[4].set_xlabel('x')
+
+    subs[0].legend(loc='best')
+
+
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
     """_test_convergence(init_wave, 
@@ -587,10 +662,12 @@ if __name__ == "__main__":
                       fig_err=plt.subplots(1)[1],
                       t_final = 3.0)
     """
-    _test_sod(t_final=0.2, Nx=569)
+    #_test_sod(t_final=0.2, Nx=569)
     
-    _test_dustybox_time(Nx=256, t_final= 2.0)
+    #_test_dustybox_time(Nx=256, t_final= 2.0)
     
-    _test_dustybox_convergence(t_final=0.5)
+    #_test_dustybox_convergence(t_final=0.5)
+    
+    _test_const_gravity()
     
     plt.show()

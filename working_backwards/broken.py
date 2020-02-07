@@ -610,14 +610,14 @@ def _test_const_gravity(t_final=1.0, Nx=256, gravity=1.0, dust_gas_ratio=1.0):
     f, subs = plt.subplots(5, 1)
     
     xI, WI = solve_euler(Nx, IC, 0, Ca=0.4,
-                         mesh_type="fixed", b_type = "flow",
+                         mesh_type="fixed", b_type = "reflecting",
                          dust_gas_ratio= dust_gas_ratio, gravity = gravity)
     for i in range(0,5):
         subs[i].plot(xI, WI[:,i], c="k", label="IC")
     
     for t in [0.5, 1.0, 2.0, 3.0]:
         x, W = solve_euler(Nx, IC, t, Ca=0.4, 
-                           mesh_type = "fixed", b_type = "flow",
+                           mesh_type = "fixed", b_type = "reflecting",
                            dust_gas_ratio = dust_gas_ratio, gravity=gravity)
         for i in range(0,5):
             subs[i].plot(x, W[:,i], label=str(t))
