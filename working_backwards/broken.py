@@ -4,7 +4,7 @@ from dustywave_sol2 import *
 
 GAMMA = 5./3
 NHYDRO = 5
-FB = 0
+FB = 1.0
 K=0.0
 
 class Arepo2(object):
@@ -189,6 +189,12 @@ def solve_euler(Npts, IC, tout, Ca = 0.5, fixed_v = 0.0, mesh_type = "fixed",
             Qb[-stencil:, 1] = -1*np.flip(Qb[Npts:Npts+stencil, 1], axis=0)
             Qb[ :stencil, 4] = -1*np.flip(Qb[stencil:2*stencil, 4], axis=0)
             Qb[-stencil:, 4] = -1*np.flip(Qb[Npts:Npts+stencil, 4], axis=0)
+        
+        elif b_type == "flow":
+            Qb = np.empty([shape, NHYDRO])
+            Qb[stencil:-stencil] = Q
+            Qb[ : stencil] = Qb[stencil]
+            Qb[-stencil:] = Qb[Npts+stencil-1]
         return Qb
 
     
@@ -232,7 +238,7 @@ def solve_euler(Npts, IC, tout, Ca = 0.5, fixed_v = 0.0, mesh_type = "fixed",
         return(xc, dx)
     
     # Set the initial conditions
-    W = IC(xc[stencil:-stencil], dust_gas_ratio)
+    W = IC(xc[stencil:-stencil], dust_gas_ratio = dust_gas_ratio, gravity=gravity)
     U = prim2cons(W)
     Q = U * dx[1:-1].reshape(-1,1)
     t = 0
@@ -400,7 +406,7 @@ def _test_convergence(IC, pmin=4, pmax=10, figs_evol=None, fig_err=None, t_final
         figs_evol[1].plot(x, true[:,4], c="black", 
                                   label="dust", linestyle = "--")
 
-def init_wave(xc, cs0=1.0, rho0=1.0, v0=1.0, drho=1e-6, t=0, dust_gas_ratio = 1.0):
+def init_wave(xc, cs0=1.0, rho0=1.0, v0=1.0, drho=1e-6, t=0, dust_gas_ratio = 1.0, gravity=0.0):
     if t == 0:
         kx = 2*np.pi*xc
     
@@ -428,7 +434,7 @@ def init_wave(xc, cs0=1.0, rho0=1.0, v0=1.0, drho=1e-6, t=0, dust_gas_ratio = 1.
         W[:,4] = v0 + sol.v_dust(x)
     return W
 
-def init_sod(xc, dust_gas_ratio = 1.0):
+def init_sod(xc, dust_gas_ratio = 1.0, gravity=0.0):
     Pl = 1.0
     Pr = 0.1
     rhol = 1.0
@@ -488,7 +494,7 @@ def _test_sod(Nx=256, t_final=0.1):
     subs[4].set_xlim(0, 0.5)"""
 
 
-def init_dustybox(xc, dust_gas_ratio = 1.0):
+def init_dustybox(xc, dust_gas_ratio = 1.0, gravity=0.0):
     W = np.full([len(xc), NHYDRO], np.nan)
     P = 1.0
     rho_g = 1.0
@@ -550,7 +556,6 @@ def analytical_dustybox_feedback(t, dust_gas_ratio=1.0):
     
     p_dust_out = p_g*(ed-ed*exp) + p_d*(ed+eg*exp)
     v_dust_out = p_dust_out / rho_d
-    print(v_dust_out)
     return(v_dust_out)
 
 def _test_dustybox_convergence(pmin = 4, pmax=10, t_final=1.0):
@@ -571,7 +576,6 @@ def _test_dustybox_convergence(pmin = 4, pmax=10, t_final=1.0):
             if vL == 0:
                 vL = 1e-20
             vLs.append(vL)
-            print(vL)
         plt.plot(N, vLs, label="Lagrangian ratio=" + str(ratio))
         plt.xlabel("N")
         plt.ylabel("Dust velocity error")
@@ -580,19 +584,53 @@ def _test_dustybox_convergence(pmin = 4, pmax=10, t_final=1.0):
     plt.xscale("log")
 
 
-def init_const_gravity(xc, gravity=1.0):
-    #Scale factor H=1 => P=rho and (gamma-1)*e=1
-    rho_g = 1.0*np.exp(-xc*gravity)
-    P = 1.0*np.exp(-xc*gravity)
+def init_const_gravity(xc, dust_gas_ratio=1.0, gravity=1.0):
+    W = np.full([len(xc), NHYDRO], np.nan)
+    H = (gravity*GAMMA)
+    P_0 = 1.0
+    rho_0 = P_0*GAMMA
+    
+    rho_g = rho_0*np.exp(xc*H)
+    P = P_0*np.exp(xc*H)
     v_g=0
     v_d=0
     #insert rho dust in as a constant, since gas is in equilibrium already.
-    rho_d = 0.1
+    rho_d = rho_g*dust_gas_ratio
+    
     W[:,0] = rho_g
     W[:,1] = v_g
     W[:,2] = P
     W[:,3] = rho_d
     W[:,4] = v_d
+    
+    return(W)
+
+def _test_const_gravity(t_final=1.0, Nx=256, gravity=1.0, dust_gas_ratio=1.0):
+    IC = init_const_gravity
+    f, subs = plt.subplots(5, 1)
+    
+    xI, WI = solve_euler(Nx, IC, 0, Ca=0.4,
+                         mesh_type="fixed", b_type = "flow",
+                         dust_gas_ratio= dust_gas_ratio, gravity = gravity)
+    for i in range(0,5):
+        subs[i].plot(xI, WI[:,i], c="k", label="IC")
+    
+    for t in [0.5, 1.0, 2.0, 3.0]:
+        x, W = solve_euler(Nx, IC, t, Ca=0.4, 
+                           mesh_type = "fixed", b_type = "flow",
+                           dust_gas_ratio = dust_gas_ratio, gravity=gravity)
+        for i in range(0,5):
+            subs[i].plot(x, W[:,i], label=str(t))
+    
+    subs[0].set_ylabel('Density')
+    subs[1].set_ylabel('Velocity')
+    subs[2].set_ylabel('Pressure')
+    subs[3].set_ylabel('Dust Density')
+    subs[4].set_ylabel('Dust Velocity')
+    
+    subs[4].set_xlabel('x')
+
+    subs[0].legend(loc='best')
 
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
@@ -601,10 +639,12 @@ if __name__ == "__main__":
                       fig_err=plt.subplots(1)[1],
                       t_final = 3.0)
     """
-    _test_sod(t_final=0.2, Nx=569)
+    #_test_sod(t_final=0.2, Nx=569)
     
     _test_dustybox_time(Nx=256, t_final= 2.0)
     
-    _test_dustybox_convergence(t_final=0.5)
+    #_test_dustybox_convergence(t_final=0.5)
+    
+    #_test_const_gravity(t_final=1.0, Nx=500, gravity=1.0, dust_gas_ratio=1.0)
     
     plt.show()
