@@ -745,7 +745,7 @@ def init_dusty_shock_Ctype(xc, dust_gas_ratio = 1.0, gravity=0.0, GAMMA=1.0001):
 def _test_dusty_shocks(t_final=1.0, Nx=500, Ca=0.4):
     linestyles = [":", "--", "-"]
     D = [0.5, 1.0]
-    """for i in range(0,2):
+    for i in range(0,2):
         plt.figure()
         x, W = solve_euler(Nx, init_dusty_shock_Ctype, t_final, Ca=Ca,
                            mesh_type = "fixed", b_type = "inflowL_and_reflectR", dust_reflect = True,
@@ -764,21 +764,28 @@ def _test_dusty_shocks(t_final=1.0, Nx=500, Ca=0.4):
         plt.title("C-type shock, t=" + str(t_final) + ", D=" + str(D[i]))
         plt.legend(loc="best")
         
-        #plt.figure()
-        #plt.title("C-type shock density, t=" + str(t_final) + ", D=" + str(D[i]))
-        #plt.plot(x, W[:,0], c="r", ls=linestyles[i], label="Gas density" + str(D[i]))
-        #plt.plot(x, W[:,3], c="k", ls=linestyles[i], label="Dust density" + str(D[i]))
-    """
+        plt.figure()
+        plt.title("C-type shock density, t=" + str(t_final) + ", D=" + str(D[i]))
+       
+        plt.plot(x, W[:,0], c="r", ls=linestyles[i], label="Gas density" + str(D[i]))
+        plt.plot(x, W[:,3], c="k", ls=linestyles[i], label="Dust density" + str(D[i]))
+       
+        plt.plot(true["xi"], true["rhog"], c="pink", ls=linestyles[i], label="True Gas; D=" + str(D[i]))
+        plt.plot(true["xi"], true["rhod"], c="gray", ls=linestyles[i], label="True Dust; D=" + str(D[i]))
+        plt.xlabel("pos")
+        plt.ylabel("rho")
+        plt.legend(loc="best")
+    
     D = [0.01, 0.1, 1.0]
     for i in range(0,3):
         plt.figure()
         x, W = solve_euler(Nx, init_dusty_shock_Jtype, t_final, Ca=Ca,
                            mesh_type = "fixed", b_type = "inflowL_and_reflectR",
-                           dust_gas_ratio = D[i], GAMMA=1.00001, xend=5.0)
+                           dust_gas_ratio = D[i], GAMMA=1.00001, xend=10.0)
         
         plt.plot(x, W[:,1], c="r", ls=linestyles[i], label="Gas; D=" + str(D[i]))
         plt.plot(x, W[:,4], c="k", ls=linestyles[i], label="Dust; D=" + str(D[i]))
-        true = shock(1.1, D[i], {'drag_type':'power_law', 'drag_const':1.0}, 10., 1000., t=t_final, FB=FB, Kin=K)
+        true = shock(1.1, D[i], {'drag_type':'power_law', 'drag_const':1.0}, 20., 1000., t=t_final, FB=FB, Kin=K)
         plt.plot(true["xi"], true["wd"], c="gray", ls=linestyles[i], label="True Dust; D=" + str(D[i]))
         plt.plot(true["xi"], true["wg"], c="pink", ls=linestyles[i], label="True Gas; D=" + str(D[i]))
         
@@ -786,14 +793,19 @@ def _test_dusty_shocks(t_final=1.0, Nx=500, Ca=0.4):
         plt.ylabel("v")
         plt.title("J-type shock, t=" + str(t_final))
         plt.legend(loc="best")
-        
+       
+       
         plt.figure()
         plt.title("J-type shock density, t=" + str(t_final) + ", D=" + str(D[i]))
+       
         plt.plot(x, W[:,0], c="r", ls=linestyles[i], label="Gas density" + str(D[i]))
         plt.plot(x, W[:,3], c="k", ls=linestyles[i], label="Dust density" + str(D[i]))
+       
         plt.plot(true["xi"], true["rhog"], c="pink", ls=linestyles[i], label="True Gas; D=" + str(D[i]))
         plt.plot(true["xi"], true["rhod"], c="gray", ls=linestyles[i], label="True Dust; D=" + str(D[i]))
-        
+        plt.xlabel("pos")
+        plt.ylabel("rho")
+        plt.legend(loc="best")
 
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
@@ -810,7 +822,7 @@ if __name__ == "__main__":
     
     #_test_const_gravity()
     
-    for t in [3.0]:
+    for t in [6.0]:
         _test_dusty_shocks(t_final=t)
     
     plt.show()
