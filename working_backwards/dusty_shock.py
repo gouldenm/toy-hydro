@@ -28,19 +28,32 @@ class SolverError(Exception):
 ###################################################
 def shock(mach, D_ratio, drag_params, shock_length, shock_step, t=0, c_s=1.0, Kin=1.0, rhog0=1.0, FB=0):
     # ### ### ### Redefine K ### ### ### ### 
-    rhog0 = mach**2 * rhog0 *(1+D_ratio) #changes across boundary
-    rhod0 = rhog0*D_ratio*rhog0
+    rhod0 = rhog0*D_ratio
+    rhog0 = mach**2 * rhog0 *(1+0*D_ratio) #changes across boundary
     K = Kin * rhog0 * rhod0
-    v_s =  mach * c_s
+    v_s =  mach * c_s 
     
-    def derivs(z, y):    
+    def derivs(z, y):
+        wd = y[0]
+        rhog = y[1]
+        rhod = y[2]
+        new_D_ratio = rhod / rhog
         try:
-            w = gas_velocity(y[0], mach, D_ratio)
+            w = gas_velocity(wd, mach, new_D_ratio)
         except SolverError:
             return -1
         
-        dydz = -abs(y[0]-w) *(Kin*rhog0/v_s)
-        return(dydz)
+        #new_c_s =  np.sqrt((rhog0*v_s**2 + rhod0*v_s**2 + rhog0*c_s**2 - rhog*(w*v_s)**2 - rhod*(wd*v_s)**2)/rhog)
+        #print(new_c_s)
+        
+        dwdz = -abs(wd -w) *(Kin*rhog/(wd*v_s))
+        
+        #drhod_dz = -dwdz*rhod0 / v_s**2
+        #drhog_dz = FB* drhod_dz * v_s**2 / (c_s**2 - v_s**2)
+        
+        drhod_dz = - dwdz * rhod / (wd*v_s**2)
+        drhog_dz = FB * drhod_dz * (wd*v_s)**2 / (c_s**2 - (w*v_s)**2)
+        return(dwdz, drhog_dz, drhod_dz)
             
     ###################################################
     
@@ -73,17 +86,19 @@ def shock(mach, D_ratio, drag_params, shock_length, shock_step, t=0, c_s=1.0, Ki
     ################## SOLVE THE ODES! ###################
     try:         
         if mach > 1.:
-            result = solve_ivp(derivs, [0, shock_length], [1.0],
-                               t_eval = arange(0, shock_length, shock_length/shock_step))
+            result = solve_ivp(derivs, [0, shock_length], [1.0, rhog0, rhod0],
+                               t_eval = arange(0, shock_length, shock_length/shock_step),
+                               method='BDF')
             #result = solver.solve(arange(0.0,  shock_length, shock_length/shock_step), [1.])
         else:
-            result = solve_ivp(derivs, [0, shock_length], [1.0-1e-4],
+            result = solve_ivp(derivs, [0, shock_length], [(1.0-1e-4)/mach, rhog0, rhod0],
                                t_eval = arange(0, shock_length, shock_length/shock_step))
             #result = solver.solve(arange(0.0,  shock_length, shock_length/shock_step), [1.-1.e-2])
                 
         xi = result.t
         wd = result.y[0]
-
+        rho_g = result.y[1]
+        rho_d = result.y[2]
 
         
         #####################################################################
@@ -91,18 +106,19 @@ def shock(mach, D_ratio, drag_params, shock_length, shock_step, t=0, c_s=1.0, Ki
         print (' Solver failed:', e)
         raise Exception('Solver failed. Great error message!')
         
-    
+    new_D_ratio = rho_d / rho_g
     v_post =v_s/((1+FB*D_ratio)*mach**2)
     
-    #scale = K / (FB*rhod0*v_s)
     dx = t*v_post
-    scaled_x = xi + 5.0 - dx
+    scaled_x = xi + 5 - dx
     
-    
+    print(rho_g[-1], rho_d[-1])
     solution={
         'xi': scaled_x,  #shift to match up with our frame
         'wd': wd*v_s - v_post,
-        'wg': gas_velocity(wd, mach, D_ratio)*v_s - v_post
+        'wg': gas_velocity(wd, mach, new_D_ratio)*v_s - v_post,
+        'rhog': rho_g,
+        'rhod': rho_d
     }
     
     return solution
