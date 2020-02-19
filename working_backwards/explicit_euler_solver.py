@@ -2,10 +2,11 @@ from __future__ import print_function
 import numpy as np
 from dustywave_sol2 import *
 from dust_settling_sol import *
+from dusty_shock import *
 
 NHYDRO = 5
-FB = 0
-K=10.0
+FB = 1.0
+K=1.0
 
 class Arepo2(object):
     """Second-order reconstruction as in AREPO."""
@@ -101,13 +102,21 @@ def HLL_solver(WLin, WRin, vf, GAMMA):
     
     Sm = (WL[:,1] - csl).reshape(-1,1)
     Sp = (WR[:,1] + csr).reshape(-1,1)
-
-    
+    """print(UL[:,1])
+    print(UR[:,1])
+    print(fL[:,1])
+    print(fR[:,1])
+    print(WL[:,1])
+    print(WR[:,1])
+    """
     # HLL central state in face frame
     fHLL = np.zeros_like(fL)
     fHLL[:,:3] = (Sp*fL[:,:3] - Sm*fR[:,:3] + Sp*Sm*(UR [:,:3]- UL[:,:3])) / (Sp - Sm)
 
     # Left / Right states
+    #print(Sm.reshape(-1))
+    #print(Sp.reshape(-1))
+    #print("\n")
     indexL = Sm.reshape(-1) >= 0
     indexR = Sp.reshape(-1) <= 0
     fHLL[indexL,:3] = fL[indexL,:3]
@@ -160,7 +169,8 @@ def solve_euler(Npts, IC, tout, Ca = 0.5, fixed_v = 0.0, mesh_type = "fixed",
                 dust_gas_ratio = 1.0,
                 gravity = 0.0,
                 dust_reflect = False,  #ignore reflection of dust velocity unless set to True
-                GAMMA=5./3.): 
+                GAMMA=5./3.,
+                xend=1.0): 
     """Test schemes using an Explicit TVD RK integration"""
     # Setup up the grid
     reconstruction = Arepo2
@@ -168,8 +178,8 @@ def solve_euler(Npts, IC, tout, Ca = 0.5, fixed_v = 0.0, mesh_type = "fixed",
     order = reconstruction.ORDER
     
     shape = Npts + 2*stencil
-    dx0 = 1. / Npts
-    xc = np.linspace(-dx0*stencil + dx0*0.5, 1+ dx0*stencil - dx0*0.5, shape)
+    dx0 = xend / Npts
+    xc = np.linspace(-dx0*stencil + dx0*0.5, xend+ dx0*stencil - dx0*0.5, shape)
     dx = (xc[2:] - xc[:-2])*0.5
     
     # Reconstruction function:
@@ -435,6 +445,7 @@ def _test_convergence(IC, pmin=4, pmax=10, figs_evol=None, fig_err=None, t_final
         figs_evol[1].plot(x, true[:,4], c="black", 
                                   label="dust", linestyle = "--")
 
+
 def init_wave(xc, cs0=1.0, rho0=1.0, v0=1.0, drho=1e-6, t=0, dust_gas_ratio = 1.0, GAMMA=5./3.):
     if t == 0:
         kx = 2*np.pi*xc
@@ -463,6 +474,7 @@ def init_wave(xc, cs0=1.0, rho0=1.0, v0=1.0, drho=1e-6, t=0, dust_gas_ratio = 1.
         W[:,4] = v0 + sol.v_dust(x)
     return W
 
+
 def init_sod(xc, dust_gas_ratio = 1.0, gravity=0.0, GAMMA=5./3.):
     Pl = 1.0
     Pr = 0.1
@@ -487,6 +499,7 @@ def init_sod(xc, dust_gas_ratio = 1.0, gravity=0.0, GAMMA=5./3.):
     W[:,3] = W[:,0]
     W[:,4] = W[:,1]
     return(W)
+
 
 def _test_sod(Nx=256, t_final=0.1, gravity=0.0):
     IC = init_sod
@@ -538,7 +551,8 @@ def init_dustybox(xc, dust_gas_ratio = 1.0, gravity=0.0, GAMMA=5./3.):
     W[:,4] = v_d
     
     return(W)
-    
+
+
 def _test_dustybox_time(Nx=256, t_final= 1.0):
     IC = init_dustybox
     
@@ -587,6 +601,7 @@ def analytical_dustybox_feedback(t, dust_gas_ratio=1.0):
     v_dust_out = p_dust_out / rho_d
     print(v_dust_out)
     return(v_dust_out)
+
 
 def _test_dustybox_convergence(pmin = 4, pmax=10, t_final=1.0):
     IC = init_dustybox
@@ -675,7 +690,33 @@ def _test_const_gravity(t_final=1.0, Nx=256, gravity=-1.0, dust_gas_ratio=1.0, C
 
 
 def init_dusty_shock_Jtype(xc, dust_gas_ratio = 1.0, gravity=0.0, GAMMA=1.0001):
-    M = 2.0     
+    M = 1.1    
+    
+    P = 1.0
+    rho = 1.0
+    rho_d = dust_gas_ratio*rho
+    
+    c_s = np.sqrt(P/rho)
+    v_s = c_s*M
+    v_post = v_s/((1+ FB*dust_gas_ratio)*M**2)
+    
+    #print("J-type:")
+    #print(v_s, v_post)
+    dv = v_s - v_post
+    #print(dv)
+    #print("\n")
+    
+    W = np.full([len(xc), NHYDRO], np.nan)
+    W[:, 0] = rho
+    W[:, 1] = dv
+    W[:, 2] = P
+    W[:, 3] = rho_d
+    W[:, 4] = dv
+    return(W)
+
+
+def init_dusty_shock_Ctype(xc, dust_gas_ratio = 1.0, gravity=0.0, GAMMA=1.0001):
+    M = 0.96
     
     P = 1.0
     rho = 1.0
@@ -686,30 +727,71 @@ def init_dusty_shock_Jtype(xc, dust_gas_ratio = 1.0, gravity=0.0, GAMMA=1.0001):
     v_post = v_s/((1+dust_gas_ratio)*M**2)
     
     dv = v_s - v_post
+    #print("C-type dv", dv)
     
     W = np.full([len(xc), NHYDRO], np.nan)
     
+    #Set one cell on left to shock velocity; all cells on right to post-shock velocity
     W[:, 0] = rho
-    W[:, 1] = dv
     W[:, 2] = P
-    
     W[:,3] = rho_d
+   
+    W[:, 1] = dv
+    
     W[:,4] = dv
     return(W)
 
 
-def _test_dusty_shocks(t_final=1, Nx=256, Ca=0.4):
-    plt.figure()
+def _test_dusty_shocks(t_final=1.0, Nx=500, Ca=0.4):
     linestyles = [":", "--", "-"]
+    D = [0.5, 1.0]
+    for i in range(0,2):
+        plt.figure()
+        x, W = solve_euler(Nx, init_dusty_shock_Ctype, t_final, Ca=Ca,
+                           mesh_type = "fixed", b_type = "inflowL_and_reflectR", dust_reflect = True,
+                           dust_gas_ratio = D[i], GAMMA=1.00001, xend=5.0)
+        
+        plt.plot(x, W[:,1], c="r", ls=linestyles[i], label="Gas; D=" + str(D[i]))
+        plt.plot(x, W[:,4], c="k", ls=linestyles[i], label="Dust; D=" + str(D[i]))
+        
+        true = shock(0.96, D[i], {'drag_type':'power_law', 'drag_const':1.0}, 15., 1000., t=t_final, FB=FB, Kin=K)
+        plt.plot(true["xi"], true["wd"], c="gray", ls=linestyles[i], label="True Dust; D=" + str(D[i]))
+        plt.plot(true["xi"], true["wg"], c="pink", ls=linestyles[i], label="True Gas; D=" + str(D[i]))
+        
+        
+        plt.xlabel("pos")
+        plt.ylabel("v")
+        plt.title("C-type shock, t=" + str(t_final) + ", D=" + str(D[i]))
+        plt.legend(loc="best")
+        
+        #plt.figure()
+        #plt.title("C-type shock density, t=" + str(t_final) + ", D=" + str(D[i]))
+        #plt.plot(x, W[:,0], c="r", ls=linestyles[i], label="Gas density" + str(D[i]))
+        #plt.plot(x, W[:,3], c="k", ls=linestyles[i], label="Dust density" + str(D[i]))
+    
     D = [0.01, 0.1, 1.0]
-    v_s = 2.0 #since P=rho=1, c_s=1, thus v_s=Mach number
     for i in range(0,3):
+        plt.figure()
         x, W = solve_euler(Nx, init_dusty_shock_Jtype, t_final, Ca=Ca,
-                           mesh_type = "fixed", b_type = "flow", dust_reflect = True,
-                           dust_gas_ratio = D[i], GAMMA=1.00001)
-        plt.plot(x, W[:,1]/v_s, c="r", ls=linestyles[i], label="Gas; D=" + str(D[i]))
-        plt.plot(x, W[:,4]/v_s, c="k", ls=linestyles[i], label="Dust; D=" + str(D[i]))
-    plt.legend(loc="best")
+                           mesh_type = "fixed", b_type = "inflowL_and_reflectR",
+                           dust_gas_ratio = D[i], GAMMA=1.00001, xend=5.0)
+        
+        plt.plot(x, W[:,1], c="r", ls=linestyles[i], label="Gas; D=" + str(D[i]))
+        plt.plot(x, W[:,4], c="k", ls=linestyles[i], label="Dust; D=" + str(D[i]))
+        true = shock(1.1, D[i], {'drag_type':'power_law', 'drag_const':1.0}, 15., 1000., t=t_final, FB=FB, Kin=K)
+        plt.plot(true["xi"], true["wd"], c="gray", ls=linestyles[i], label="True Dust; D=" + str(D[i]))
+        plt.plot(true["xi"], true["wg"], c="pink", ls=linestyles[i], label="True Gas; D=" + str(D[i]))
+        
+        plt.xlabel("pos")
+        plt.ylabel("v")
+        plt.title("J-type shock, t=" + str(t_final))
+        plt.legend(loc="best")
+        
+        plt.figure()
+        plt.title("J-type shock density, t=" + str(t_final) + ", D=" + str(D[i]))
+        plt.plot(x, W[:,0], c="r", ls=linestyles[i], label="Gas density" + str(D[i]))
+        plt.plot(x, W[:,3], c="k", ls=linestyles[i], label="Dust density" + str(D[i]))
+    
 
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
@@ -726,6 +808,7 @@ if __name__ == "__main__":
     
     #_test_const_gravity()
     
-    _test_dusty_shocks()
+    for t in [3.0]:
+        _test_dusty_shocks(t_final=t)
     
     plt.show()

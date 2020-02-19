@@ -13,159 +13,51 @@
 #limitations under the License.
 
 from math import sqrt
+import numpy as np
 from scikits_extract import ode
+from scipy.integrate import solve_ivp
 from numpy import arange, array
+import matplotlib.pyplot as plt
 
 
 ###################################################
 class SolverError(Exception):
     pass
 ###################################################
-    
-    
-    
-    
-    
-    
-    
 
 ###################################################
-def derivs(z, y, dydz, params):
-    '''
-    RHS function (rhseqn) for the ode function in scikits.odes
-
-    Parameters
-    ----------
-    z : float
-        position (never used here)
-    y : array
-        y[0] = wd
-    dydz : array
-        derivative of wd at the position z (length 1)
-    params : dict
-        dictionary of constants required in various places
-
-    Returns
-    -------
-        None; this function just operates on the dydz vector
-    '''
-
-    try:
-        w = gas_velocity(y[0], params['mach'], params['D_ratio'])
-    except SolverError:
-        return -1
-
-    if params['drag_type'] == 'power_law':
-        n = params['drag_const']
-        dydz[0] = -abs(y[0]-w)**(n+1.)
-    elif params['drag_type'] == 'third_order':
-        k = params['drag_const']
-        dydz[0] = -(1. + k*abs(y[0]-w)**2.)*(y[0]-w)
-    elif params['drag_type'] == 'mixed':
-        k = params['drag_const']
-        dydz[0] = -(1. + k*abs(y[0]-w)**2.)**0.5*(y[0]-w)
+def shock(mach, D_ratio, drag_params, shock_length, shock_step, t=0, c_s=1.0, Kin=1.0, rhog0=1.0, FB=0):
+    # ### ### ### Redefine K ### ### ### ### 
+    rhog0 = mach**2 * rhog0 *(1+D_ratio) #changes across boundary
+    rhod0 = rhog0*D_ratio*rhog0
+    K = Kin * rhog0 * rhod0
+    v_s =  mach * c_s
+    
+    def derivs(z, y):    
+        try:
+            w = gas_velocity(y[0], mach, D_ratio)
+        except SolverError:
+            return -1
         
-###################################################
+        dydz = -abs(y[0]-w) *(Kin*rhog0/v_s)
+        return(dydz)
+            
+    ###################################################
     
     
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-###################################################
-def gas_velocity(wd, mach, D_ratio):
-    '''
-    Returns dimensionless gas velocity (vg/vs)
-     
-    Parameters
-    ----------
-    wd : float
-        dimensionless dust velocity vd/vs
-    mach : float
-        mach number vs/cs (cs is preshock sound speed)
-    D_ratio : float
-        initial dust-to-gas mass density ratio
-
-    Returns
-    -------
-    w : float
-        normalised gas velocity vg/vs
-
-    '''
-    beta = 1.0 + mach**(-2.) + D_ratio*(1. - wd)
-    disc = beta**2 - 4.0/mach**2. #discriminant of quadratic
-    
-    if disc < 0.0:
-        raise SolverError('Error in gas_velocity: no solution for gas velocity')
-
-    w = 0.5*(beta - sqrt(disc))
-    
-    return w
-###################################################
-
-
-
-
-
-
-
-###################################################
-def shock(mach, D_ratio, drag_params, shock_length, shock_step):
-    '''
-    Solve. The main function of PyDustyShock. This solves
-    the first order ODE describing a two-fluid dust-gas shock.
-    
-    Paramaters
-    ----------
-    mach : float
-        sonic mach number vs/cs
-    D_ratio : float
-        preshock dust-to-gas mass density ratio
-    drag_params : dict
-        dictionary of things relevant to the drag, has keys
-            'drag_type': str
-                sets the form of the drag, 'power_law', 'third_order',
-                'mixed' are the allowed entries
-            'drag_const': float
-                different for each drag type; let drag_const=k, then
-                derivative of dust velocity is
-                 
-                 -abs(wd-wg)^(k+1.) for 'power_law'
-                 -(1 + k|wd-wg|^2)(wd-wg) for 'third_order'
-                 -(1 + k|wd-wg|^2)^0.5 (wd-wg) for 'mixed'
-                 
-                 where w=v/vs, vs is the shock velocity
-    shock_length : float
-        integration length (in units of xi?). I haven't figured this out
-        yet, but for a shock with mach=2, D_ratio=2, 
-        drag_type='power_law' and drag_const=0, this number should be ~10.
-    shock_step : float
-        number of points to sample the shock solution at, e.g. maybe
-        10xshock_length
-
-    Returns
-    -------
-    solution : dict
-        dictionary with entries
-        'xi': numpy array
-            dimensionless position
-        'wd': numpy array
-            normalised dust velocity v_dust/vs
-        'wg': numpy array
-            normalised gas velocity v_gas/vs
-    '''
-    ### Couple of validity checks ###
+    ###################################################
+    def gas_velocity(wd, mach, D_ratio):
+        
+        beta = 1.0 + mach**(-2.) + FB*D_ratio*(1. - wd)
+        disc = beta**2 - 4.0/mach**2. #discriminant of quadratic
+        
+        if np.any(disc < 0.0):
+            raise SolverError('Error in gas_velocity: no solution for gas velocity')
+        
+        w = 0.5*(beta - np.sqrt(disc))
+        
+        return w
+    ###################################################
 
     # The shock velocity must be greater than the combined fluid velocity
     if mach <= (1. + D_ratio)**-0.5:
@@ -178,30 +70,19 @@ def shock(mach, D_ratio, drag_params, shock_length, shock_step):
         raise Exception('drag_type not found; must be: \'power_law\', \'third_order\', or \'mixed\'')
     ###
 
-
-
-    params = {
-        'mach' : mach,
-        'D_ratio' : D_ratio,
-        'drag_type': drag_params['drag_type'],
-        'drag_const': drag_params['drag_const']
-    }
-
-
-
     ################## SOLVE THE ODES! ###################
     try:         
-        solver = ode('cvode', derivs, user_data=params, max_steps=50000)
-        
         if mach > 1.:
-            result = solver.solve(arange(0.0,  shock_length, shock_length/shock_step), [1.])
+            result = solve_ivp(derivs, [0, shock_length], [1.0],
+                               t_eval = arange(0, shock_length, shock_length/shock_step))
+            #result = solver.solve(arange(0.0,  shock_length, shock_length/shock_step), [1.])
         else:
-            result = solver.solve(arange(0.0,  shock_length, shock_length/shock_step), [1.-1.e-2])
+            result = solve_ivp(derivs, [0, shock_length], [1.0-1e-4],
+                               t_eval = arange(0, shock_length, shock_length/shock_step))
+            #result = solver.solve(arange(0.0,  shock_length, shock_length/shock_step), [1.-1.e-2])
                 
-        xi = array(result[1])
-        
-        # Create array of the solutions wd
-        wd = [result[2][i][0] for i in xrange(len(xi))]
+        xi = result.t
+        wd = result.y[0]
 
 
         
@@ -210,18 +91,63 @@ def shock(mach, D_ratio, drag_params, shock_length, shock_step):
         print (' Solver failed:', e)
         raise Exception('Solver failed. Great error message!')
         
-
-
-
-
+    
+    v_post =v_s/((1+FB*D_ratio)*mach**2)
+    
+    #scale = K / (FB*rhod0*v_s)
+    dx = t*v_post
+    scaled_x = xi + 5.0 - dx
+    
+    
     solution={
-        'xi': xi,
-        'wd': array(wd),
-        'wg': array([gas_velocity(wd[i], mach, D_ratio) for i in xrange(len(result[2]))])
+        'xi': scaled_x,  #shift to match up with our frame
+        'wd': wd*v_s - v_post,
+        'wg': gas_velocity(wd, mach, D_ratio)*v_s - v_post
     }
     
     return solution
 
-sol = shock(2.0, 2.0, {'drag_type':'power_law', 'drag_const':0.0}, 10., 100.)
-###################################################
 
+
+
+
+#shock(mach, D_ratio, drag_params, shock_length, shock_step)
+
+"""
+sol1 = shock(1.1, 0.01, {'drag_type':'power_law', 'drag_const':1.0}, 15., 1000.)
+sol2 = shock(1.1, 0.1, {'drag_type':'power_law', 'drag_const':1.0}, 15., 1000.)
+sol3 = shock(1.1, 1.0, {'drag_type':'power_law', 'drag_const':1.0}, 15., 1000.)
+
+plt.figure()
+plt.plot(sol1['xi'], sol1['wd'])
+plt.plot(sol1['xi'], sol1['wg'])
+
+plt.figure()
+plt.plot(sol2['xi'], sol2['wd'])
+plt.plot(sol2['xi'], sol2['wg'])
+
+plt.figure()
+plt.plot(sol3['xi'], sol3['wd'])
+plt.plot(sol3['xi'], sol3['wg'])
+"""
+
+
+"""
+sol0p1 = shock(0.96, 0.5, {'drag_type':'power_law', 'drag_const':1.0}, 15., 1000., t=4.0)
+sol1p0 = shock(0.96, 1.0, {'drag_type':'power_law', 'drag_const':1.0}, 15., 1000.)
+sol2p0 = shock(0.96, 2.0, {'drag_type':'power_law', 'drag_const':1.0}, 15., 1000.)
+
+plt.figure()
+plt.plot(sol0p1['xi'], sol0p1['wd'])
+plt.plot(sol0p1['xi'], sol0p1['wg'])
+
+plt.figure()
+plt.plot(sol1p0['xi'], sol1p0['wd'])
+plt.plot(sol1p0['xi'], sol1p0['wg'])
+
+plt.figure()
+plt.plot(sol2p0['xi'], sol2p0['wd'])
+plt.plot(sol2p0['xi'], sol2p0['wg'])
+plt.show()
+###################################################
+"""
