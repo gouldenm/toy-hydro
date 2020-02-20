@@ -26,7 +26,8 @@ class SolverError(Exception):
 ###################################################
 
 ###################################################
-def shock(mach, D_ratio, drag_params, shock_length, shock_step, t=0, c_s=1.0, Kin=1.0, rhog0=1.0, FB=0):
+def shock(mach, D_ratio, drag_params, shock_length, shock_step, 
+          t=0, c_s=1.0, Kin=1.0, rhog0=1.0, FB=0, offset=0.0):
     # ### ### ### Redefine K ### ### ### ### 
     rhod0 = rhog0*D_ratio
     rhog0 = mach**2 * rhog0 *(1+0*D_ratio) #changes across boundary
@@ -80,11 +81,12 @@ def shock(mach, D_ratio, drag_params, shock_length, shock_step, t=0, c_s=1.0, Ki
         if mach > 1.:
             result = solve_ivp(derivs, [0, shock_length], [1.0, rhog0, rhod0],
                                t_eval = arange(0, shock_length, shock_length/shock_step),
-                               method='BDF')
+                               method='Radau')
             #result = solver.solve(arange(0.0,  shock_length, shock_length/shock_step), [1.])
         else:
             result = solve_ivp(derivs, [0, shock_length], [(1.0-1e-4), rhog0, rhod0],
-                               t_eval = arange(0, shock_length, shock_length/shock_step))
+                               t_eval = arange(0, shock_length, shock_length/shock_step),
+                               method="Radau")
             #result = solver.solve(arange(0.0,  shock_length, shock_length/shock_step), [1.-1.e-2])
                 
         xi = result.t
@@ -100,7 +102,7 @@ def shock(mach, D_ratio, drag_params, shock_length, shock_step, t=0, c_s=1.0, Ki
     wg = gas_velocity(wd, mach, D_ratio)
     
     dx = t*v_post
-    scaled_x = xi + 9.95 - dx
+    scaled_x = xi + offset - dx
     
     rho_g = rhog0*vg0 / (wg*v_s)
     rho_d = rhod0*v_s / (wd*v_s)
@@ -116,47 +118,3 @@ def shock(mach, D_ratio, drag_params, shock_length, shock_step, t=0, c_s=1.0, Ki
     
     return solution
 
-
-
-
-
-#shock(mach, D_ratio, drag_params, shock_length, shock_step)
-
-"""
-sol1 = shock(1.1, 0.01, {'drag_type':'power_law', 'drag_const':1.0}, 15., 1000.)
-sol2 = shock(1.1, 0.1, {'drag_type':'power_law', 'drag_const':1.0}, 15., 1000.)
-sol3 = shock(1.1, 1.0, {'drag_type':'power_law', 'drag_const':1.0}, 15., 1000.)
-
-plt.figure()
-plt.plot(sol1['xi'], sol1['wd'])
-plt.plot(sol1['xi'], sol1['wg'])
-
-plt.figure()
-plt.plot(sol2['xi'], sol2['wd'])
-plt.plot(sol2['xi'], sol2['wg'])
-
-plt.figure()
-plt.plot(sol3['xi'], sol3['wd'])
-plt.plot(sol3['xi'], sol3['wg'])
-"""
-
-
-"""
-sol0p1 = shock(0.96, 0.5, {'drag_type':'power_law', 'drag_const':1.0}, 15., 1000., t=4.0)
-sol1p0 = shock(0.96, 1.0, {'drag_type':'power_law', 'drag_const':1.0}, 15., 1000.)
-sol2p0 = shock(0.96, 2.0, {'drag_type':'power_law', 'drag_const':1.0}, 15., 1000.)
-
-plt.figure()
-plt.plot(sol0p1['xi'], sol0p1['wd'])
-plt.plot(sol0p1['xi'], sol0p1['wg'])
-
-plt.figure()
-plt.plot(sol1p0['xi'], sol1p0['wd'])
-plt.plot(sol1p0['xi'], sol1p0['wg'])
-
-plt.figure()
-plt.plot(sol2p0['xi'], sol2p0['wd'])
-plt.plot(sol2p0['xi'], sol2p0['wg'])
-plt.show()
-###################################################
-"""
