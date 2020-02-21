@@ -5,7 +5,8 @@ from dust_settling_sol import *
 from dusty_shock import *
 
 NHYDRO = 5
-HLLC = None
+HLLC = False
+plot_every_step = None#True
 
 class Arepo2(object):
     """Second-order reconstruction as in AREPO."""
@@ -81,7 +82,7 @@ def prim2flux(W, GAMMA, FB):
     return(F)
 
 
-def HLL_solver(WLin, WRin, vf, GAMMA, FB):
+def HLL_solve(WLin, WRin, vf, GAMMA, FB):
     # transform lab frame to face frame
     WL = np.copy(WLin)
     WR = np.copy(WRin)
@@ -106,10 +107,9 @@ def HLL_solver(WLin, WRin, vf, GAMMA, FB):
     fHLL = np.zeros_like(fL)
     fHLL[:,:3] = (Sp*fL[:,:3] - Sm*fR[:,:3] + Sp*Sm*(UR [:,:3]- UL[:,:3])) / (Sp - Sm)
 
-    # Left / Right states
-    #print(Sm.reshape(-1))
-    #print(Sp.reshape(-1))
-    #print("\n")
+    if np.any(np.isnan(WL)):
+        print(WL)
+    
     indexL = Sm.reshape(-1) >= 0
     indexR = Sp.reshape(-1) <= 0
     fHLL[indexL,:3] = fL[indexL,:3]
@@ -143,7 +143,7 @@ def HLL_solver(WLin, WRin, vf, GAMMA, FB):
 
 
 
-def HLLC_solver(WLin, WRin, vf, GAMMA, FB):
+def HLLC_solve(WLin, WRin, vf, GAMMA, FB):
     # transform lab frame to face frame
     WL = np.copy(WLin)
     WR = np.copy(WRin)
@@ -159,36 +159,46 @@ def HLLC_solver(WLin, WRin, vf, GAMMA, FB):
     fR = prim2flux(WR, GAMMA, FB)
     
     #   Compute signal speeds
-    pR, pL = WR[:,2], WL[:,2]
-    uR, uL = WR[:,1], WL[:,1]
-    rhoR, rhoL = WR[:,0], WL[:,0]
+    pR, pL = WR[:,2].reshape(-1,1), WL[:,2].reshape(-1,1)
+    uR, uL = WR[:,1].reshape(-1,1), WL[:,1].reshape(-1,1)
+    rhoR, rhoL = WR[:,0].reshape(-1,1), WL[:,0].reshape(-1,1)
     
     csl = np.sqrt(GAMMA*pL/rhoL)
     csr = np.sqrt(GAMMA*pR/rhoR)
     
-    Sm = (uL - csl).reshape(-1,1)
-    Sp = (uR + csr).reshape(-1,1)
+    Sm = (uL - csl)
+    Sp = (uR + csr)
     
     Sstar = ( pR - pL + rhoL*uL*(Sm-uL) - rhoR*uR*(Sp - uR) ) / \
             (rhoL*(Sm-uL) - rhoR*(Sp-uR))
     
-    #   Compute star states
-    UstarL, UstarR = np.zeros_like(UL), np.zeros_like(UR)
+    #   Compute star fluxes using single mean pressure in the star region (Toro 10.42, 10.44, 10.26)
+    pLR = 0.5 * ( pL + pR + rhoL*(Sm - uL)*(Sstar - uL) + rhoR*(Sp - uR)*(Sstar - uR) )
     
-    L_factor = rhoL * (Sm - uL) / (Sm - Sstar)
-    UstarL[0] = L_factor
+    f_starL = np.zeros_like(fL)
+    f_starL = Sstar*(Sm*UL - fL)
+    f_starL[:,1] += Sm.flatten()*pLR.flatten()
+    f_starL[:,2] += Sm.flatten()*Sstar.flatten()*pLR.flatten()
+    f_starL = f_starL / (Sm - Sstar)
     
-    # HLL central state in face frame
-    fHLL = np.zeros_like(fL)
-    fHLL[:,:3] = (Sp*fL[:,:3] - Sm*fR[:,:3] + Sp*Sm*(UR [:,:3]- UL[:,:3])) / (Sp - Sm)
+    f_starR = np.zeros_like(fR)
+    f_starR = Sstar*(Sp*UR - fR)
+    f_starR[:,1] += Sp.flatten()*pLR.flatten()
+    f_starR[:,2] += Sp.flatten()*Sstar.flatten()*pLR.flatten()
+    f_starR = f_starR / (Sp - Sstar)
+    
 
     # Left / Right states
-    #print(Sm.reshape(-1))
-    #print(Sp.reshape(-1))
-    #print("\n")
-    indexL = Sm.reshape(-1) >= 0
-    indexR = Sp.reshape(-1) <= 0
+    fHLL = np.zeros_like(fL)
+    
+    indexL =                                 0 <= Sm.flatten()
+    indexLstar = (Sm.flatten()    <= 0 ) * ( 0 <= Sstar.flatten())
+    indexRstar = (Sstar.flatten() <= 0 ) * ( 0 <= Sp.flatten())
+    indexR =         Sp.flatten() <= 0
+    
     fHLL[indexL,:3] = fL[indexL,:3]
+    fHLL[indexLstar,:3] = f_starL[indexLstar,:3]
+    fHLL[indexRstar,:3] = f_starR[indexRstar,:3]
     fHLL[indexR,:3] = fR[indexR,:3]
     
     # ### ### ### DUST ### ### ###
@@ -216,13 +226,6 @@ def HLLC_solver(WLin, WRin, vf, GAMMA, FB):
     
     return fHLL_lab
 
-"""_HLLC = HLLC(gamma=GAMMA)
-def HLLC_solver(Wl, Wr):
-    Ul, Ur = prim2cons(Wl), prim2cons(Wr)
-    flux = _HLLC(Ul.T, Ur.T)
-
-    return flux.T
-"""
 
 def max_wave_speed(U, GAMMA, FB):
     W = cons2prim(U, GAMMA, FB)
@@ -230,7 +233,7 @@ def max_wave_speed(U, GAMMA, FB):
     max_dust = np.max(np.abs(W[:,4]))
     
     if max_dust > max_gas:
-        print(max_dust, max_gas)
+        print("Dust condition greater than gas condition,", max_dust, max_gas)
     
     return max(max_gas, max_dust)
 
@@ -248,6 +251,11 @@ def solve_euler(Npts, IC, tout, Ca = 0.5, fixed_v = 0.0, mesh_type = "fixed",
                 xend=1.0,
                 FB = 1.0,
                 K = 1.0): 
+    if HLLC:
+        HLL_solver = HLLC_solve
+    else:
+        HLL_solver = HLL_solve
+    
     """Test schemes using an Explicit TVD RK integration"""
     # Setup up the grid
     reconstruction = Arepo2
@@ -311,6 +319,7 @@ def solve_euler(Npts, IC, tout, Ca = 0.5, fixed_v = 0.0, mesh_type = "fixed",
             Qb[-1,1] = -Qb[-4,1]
             Qb[-2,1] = -Qb[-3,1]
             
+            #dust flows out on right
             Qb[-1,3:] = Qb[-3,3:]
             Qb[-1,3:] = Qb[-3,3:]
         
@@ -364,10 +373,16 @@ def solve_euler(Npts, IC, tout, Ca = 0.5, fixed_v = 0.0, mesh_type = "fixed",
     U = prim2cons(W, GAMMA, FB)
     Q = U * dx[1:-1].reshape(-1,1)
     t = 0
+    if plot_every_step:
+        f, subs = plt.subplots(5, 1, sharex=True)
+        subs[0].set_ylim(-1, 25)
+        subs[0].set_ylabel('Density')
+        subs[1].set_ylabel('Velocity')
+        subs[2].set_ylabel('Energy')
+        subs[3].set_ylabel('Dust Density')
+        subs[4].set_ylabel('Dust velocity')
+    
     while t < tout:
-        if HLLC:
-            HLL_solver = HLLC_solver
-        
         print(t)
         # 0) Calculate new timestep
         dtmax = Ca * min(dx) / max_wave_speed(U, GAMMA, FB)
@@ -467,7 +482,13 @@ def solve_euler(Npts, IC, tout, Ca = 0.5, fixed_v = 0.0, mesh_type = "fixed",
         
         #11. Update U
         U = Q/dx[1:-1].reshape(-1,1)
-    
+        
+        if plot_every_step:
+            W = cons2prim(U, GAMMA, FB)
+            for i in range(0,5):
+                subs[i].plot(xc[2:-2], W[:,i], label=str(t))
+            plt.pause(1)
+        
         t = min(tout, t+dt)
     xc = xc[stencil:-stencil]
     return xc, cons2prim(U, GAMMA, FB)
@@ -899,17 +920,16 @@ def _test_dusty_shocks(t_final=1.0, Nx=500, Ca=0.2, FB = 1.0, K=10.):
 
 
 def _test_dusty_shocks_mach(t_final=5.0, Nx=500, Ca=0.2, FB = 0.0, K=0.):
-    machs = [ 2.0, 3, 4, 5]
-    times = [1, 0.015, 0.007525, 0.006]
+    machs=[2]#machs = [ 2.0, 3, 4, 5]
+    times = [5]#[1, 0.015, 0.007525, 0.006]
     for i in range(0, len(machs)):
         mach = machs[i]
         t_final = times[i]
-        f, subs = plt.subplots(2, 1, sharex=True)
         x, W = solve_euler(Nx, init_dusty_shock_Jtype, t_final, Ca=Ca,
-                           mesh_type = "Lagrangian", b_type = "inflowL_and_reflectR",
+                           mesh_type = "fixed", b_type = "inflowL_and_reflectR",
                            dust_gas_ratio = 1.0, GAMMA=1.00001, xend=10.0, 
                            FB=FB, K=K, mach=mach)
-        
+        f, subs = plt.subplots(2, 1, sharex=True)
         subs[0].plot(x, W[:,1], c="r", label="Gas")
         subs[0].plot(x, W[:,4], c="k", label="Dust")
         
