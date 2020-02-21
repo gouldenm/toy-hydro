@@ -5,8 +5,8 @@ from dust_settling_sol import *
 from dusty_shock import *
 
 NHYDRO = 5
-HLLC = False
-plot_every_step = True
+HLLC = True
+plot_every_step = None#True
 
 class Arepo2(object):
     """Second-order reconstruction as in AREPO."""
@@ -368,9 +368,10 @@ def solve_euler(Npts, IC, tout, Ca = 0.5, fixed_v = 0.0, mesh_type = "fixed",
         f, subs = plt.subplots(5, 1, sharex=True)
         subs[0].set_ylim(-1, 25)
         subs[0].set_ylabel('Density')
-        subs[1].set_ylim(-1,3)
+        subs[1].set_ylim(-1,5)
         subs[1].set_ylabel('Velocity')
         subs[2].set_ylabel('Energy')
+        subs[3].set_ylim(0, 1.5)
         subs[3].set_ylabel('Dust Density')
         subs[4].set_ylabel('Dust velocity')
     
@@ -397,27 +398,26 @@ def solve_euler(Npts, IC, tout, Ca = 0.5, fixed_v = 0.0, mesh_type = "fixed",
         
         #5. Set interface velocities
         if mesh_type == "Lagrangian":
-            vl = WL[:,1]
-            vr = WR[:,1]
-            vf =  0.5 * (vl+vr)
-            vc = Wb[1:-1,1]
+            vc = Wb[:,1]
         else:
-            vf = fixed_v
-            vc = np.full_like(Wb[1:-1,1], fixed_v)
-            
+            vc = np.full_like(Wb[:,1], fixed_v)
+        xe = 0.5*(xc[1:] + xc[:-1])
+        f = (xe - xc[:-1]) / (xc[1:] - xc[:-1])
+        vf = f*vc[1:] + (1-f)*vc[:-1]
+        
         #6. Compute first flux
-        flux_0 =              HLL_solver(WL, WR, vf, GAMMA, FB)
+        flux_0 =              HLL_solver(WL, WR, vf[1:-1], GAMMA, FB)
         F0 = dt*np.diff(flux_0, axis=0)
         
         # 7. Move the mesh
         dxold = np.copy(dx)
-        xc, dx = update_mesh(xc, dt, Ws[1:-1])
+        xc, dx = update_mesh(xc, dt, W)
         
         # 8. Predict edge states W at t+td, starting with centre
         #8a. compute time diff
         Wb = boundary(W)[1:-1]#match gradient extent
         WL = np.copy(Wb[:-1]); WR = np.copy(Wb[1:])
-        dWdt = time_diff_W(Wb, gradW, vc)
+        dWdt = time_diff_W(Wb, gradW, vc[1:-1])
         
         #8b. predict cell centre, INCLUDING DRAG
         Ws = boundary(W)[1:-1]
@@ -438,7 +438,7 @@ def solve_euler(Npts, IC, tout, Ca = 0.5, fixed_v = 0.0, mesh_type = "fixed",
         WL = Wp[:-1]; WR = Wm[1:]
         
         #9. Compute second flux
-        flux_1 =                  HLL_solver(Wp[:-1], Wm[1:], vf, GAMMA, FB)
+        flux_1 =                  HLL_solver(Wp[:-1], Wm[1:], vf[1:-1], GAMMA, FB)
         F1 = dt*np.diff(flux_1, axis=0)
         
         # 10. Time average fluxes (both used dt, so just *0.5)
@@ -479,12 +479,7 @@ def solve_euler(Npts, IC, tout, Ca = 0.5, fixed_v = 0.0, mesh_type = "fixed",
             W = cons2prim(U, GAMMA, FB)
             for i in range(0,5):
                 subs[i].plot(xc[2:-2], W[:,i], label=str(t))
-            plt.pause(2)
-        
-        print(Q[-10:,3])
-        print(dx[-10:])
-        print(W[-10:,3])
-        print("\n")
+            plt.pause(0.5)
         t = min(tout, t+dt)
     xc = xc[stencil:-stencil]
     return xc, cons2prim(U, GAMMA, FB)
@@ -511,9 +506,6 @@ def init_dusty_shock_Jtype(xc, dust_gas_ratio = 1.0, gravity=0.0, GAMMA=1.0001, 
     W[:, 2] = P
     W[:, 3] = rho_d
     W[:, 4] = dv
-    
-    W[-10,0] = 1.5
-    W[-10,2] = 1/1.5
     return(W)
 
 
@@ -545,8 +537,8 @@ def init_dusty_shock_Ctype(xc, dust_gas_ratio = 1.0, gravity=0.0, GAMMA=1.0001, 
 
 
 def _test_dusty_shocks_mach(t_final=5.0, Nx=500, Ca=0.2, FB = 0.0, K=0.):
-    machs=[1.1]#machs = [ 2.0, 3, 4, 5]
-    times = [3]#[1, 0.015, 0.007525, 0.006]
+    machs=[2,3, 3.5]#, 5, 6, 7, 8]
+    times = [3, 2, 0.0094]
     for i in range(0, len(machs)):
         mach = machs[i]
         t_final = times[i]

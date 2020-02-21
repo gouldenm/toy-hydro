@@ -162,6 +162,7 @@ class mesh:
 		csr = np.sqrt(self.gamma*WR[:,2]/WR[:,0])
 		self.lm = WL[:,1] - csl
 		self.lp = WR[:,1] + csr
+		
 		#	Calculate GAS flux in frame of face
 		indexL = self.lm >= 0
 		indexR = self.lp <= 0
@@ -331,16 +332,7 @@ class mesh:
 			FB = 0
 		else:
 			FB = 1.
-		if plotsep is not None:
-			f, ax = plt.subplots(2,1)
-			#ax[0].plot(self.pos, self.rho_dust, color='k', label="rho_dust 0")
-			ax[0].set_ylabel("Density")
-			ax[0].plot(self.pos, self.rho_gas, linestyle="--", color='k', label="rho_gas 0")
-			#ax[1].plot(self.pos, self.v_dust, label="v_dust 0")
-			ax[1].plot(self.pos, self.v_gas, label="v_gas 0")
-			ax[1].set_ylabel("Velocity")
-			#ax[1].scatter(self.x, self.W[:,4], color='k')
-		
+			
 		while self.t < self.tend:
 			pos_save = self.x
 			rho_gas_save = self.W[:,self.i_rho_g]
@@ -449,6 +441,7 @@ class mesh:
 				self.Q[1:-1, self.i_p_g] = (FB*f_d + f_g) * dt        \
 										   + (FB*p_d + p_g)           \
 										   - FB*self.Q[1:-1, self.i_p_d]
+            
 			elif scheme == "explicit":
 				self.Q[1:-1,self.i_p_d] = (p_d + f_d*dt + self.K*rho_d*dt*p_g)\
 										   / (1+self.K*rho_g*dt)
