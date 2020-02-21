@@ -81,7 +81,7 @@ def shock(mach, D_ratio, drag_params, shock_length, shock_step,
         if mach > 1.:
             result = solve_ivp(derivs, [0, shock_length], [1.0, rhog0, rhod0],
                                t_eval = arange(0, shock_length, shock_length/shock_step),
-                               method='Radau')
+                               method='Radau', atol=1e-14)
             #result = solver.solve(arange(0.0,  shock_length, shock_length/shock_step), [1.])
         else:
             result = solve_ivp(derivs, [0, shock_length], [(1.0-1e-4), rhog0, rhod0],
@@ -107,7 +107,6 @@ def shock(mach, D_ratio, drag_params, shock_length, shock_step,
     rho_g = rhog0*vg0 / (wg*v_s)
     rho_d = rhod0*v_s / (wd*v_s)
     
-    print(rho_g[-1], rho_d[-1])
     solution={
         'xi': scaled_x,  #shift to match up with our frame
         'wd': wd*v_s - v_post,
