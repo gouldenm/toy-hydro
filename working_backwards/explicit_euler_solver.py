@@ -2,7 +2,7 @@ from __future__ import print_function
 import numpy as np
 from dustywave_sol2 import *
 from dust_settling_sol import *
-from dusty_shock import *
+from dusty_shock_adiabatic import *
 
 NHYDRO = 5
 HLLC = True
@@ -28,20 +28,20 @@ class Arepo2(object):
         Qm = Q[:-2]
         Q0 = Q[1:-1]
         Qp = Q[2:]
-
+        limit = 2.0
         Qmax = np.maximum(np.maximum(Qp, Qm), Q0)
         Qmin = np.minimum(np.minimum(Qp, Qm), Q0)
         
         #Not the least squares estimate, but what is used in AREPO code release
         grad = (Qp - Qm) / dx.reshape(-1,1)
 
-        dQ = grad*(xe[1:] - xc[1:-1]).reshape(-1,1)
+        dQ = limit*grad*(xe[1:] - xc[1:-1]).reshape(-1,1)
         Qp = Q0 + dQ
 
         pos = Qp > Qmax ; neg = Qp < Qmin
         phir = np.where(pos, (Qmax - Q0)/dQ, np.where(neg, (Qmin - Q0)/dQ, 1))
         
-        dQ = grad*(xe[0:-1] - xc[1:-1]).reshape(-1,1)
+        dQ = limit*grad*(xe[0:-1] - xc[1:-1]).reshape(-1,1)
         Qm = Q0 + dQ
 
         pos = Qm > Qmax ; neg = Qm < Qmin
@@ -530,23 +530,27 @@ def init_dusty_shock_Ctype(xc, dust_gas_ratio = 1.0, gravity=0.0, GAMMA=1.0001, 
     W[:,3] = rho_d
    
     W[:, 1] = dv
-    
     W[:,4] = dv
+    
+    
     return(W)
 
 
 
-def _test_dusty_shocks_mach(t_final=5.0, Nx=500, Ca=0.2, FB = 0.0, K=0.):
-    machs=[2,3, 3.5]#, 5, 6, 7, 8]
-    times = [3, 2, 0.0094]
+def _test_dusty_shocks_mach(t_final=5.0, Nx=200, Ca=0.2, FB = 0.0, K=0.):
+    machs=  [2, 3, 4, 5, 6, 7, 8, 10.]
+    times = [3, 3, 2.]#,   5, 6, 8, 8, 10]
+    times = [ 5./m for m in machs ]
+    #times = [10 for _ in machs]
     for i in range(0, len(machs)):
         mach = machs[i]
         t_final = times[i]
         x, W = solve_euler(Nx, init_dusty_shock_Jtype, t_final, Ca=Ca,
                            mesh_type = "Lagrangian", b_type = "inflowL_and_reflectR",
-                           dust_gas_ratio = 1.0, GAMMA=1.00001, xend=10.0, 
+                           dust_gas_ratio = 1.0, GAMMA=1.4, xend=10.0, 
                            FB=FB, K=K, mach=mach)
-        f, subs = plt.subplots(2, 1, sharex=True)
+        
+        f, subs = plt.subplots(3, 1, sharex=True)
         subs[0].plot(x, W[:,1], c="r", label="Gas")
         #subs[0].plot(x, W[:,4], c="k", label="Dust")
         
@@ -565,8 +569,12 @@ def _test_dusty_shocks_mach(t_final=5.0, Nx=500, Ca=0.2, FB = 0.0, K=0.):
        
         subs[1].plot(true["xi"], true["rhog"], c="pink", ls="--", label="True Gas")
         #subs[1].plot(true["xi"], true["rhod"], c="gray", ls="--", label="True Dust")
-        subs[1].set_xlabel("pos")
         subs[1].set_ylabel("rho")
+        
+        subs[2].plot(true['xi'], true['P'], c="pink", ls="--", label="True Pressure")
+        subs[2].plot(x, W[:,2], c="red", label="Pressure")
+        subs[2].set_ylabel("P")
+        subs[2].set_xlabel("pos")
         #plt.legend(loc="best")
 
 

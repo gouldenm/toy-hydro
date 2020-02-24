@@ -26,41 +26,47 @@ class SolverError(Exception):
 ###################################################
 
 ###################################################
-def shock(mach, D_ratio, drag_params, shock_length, shock_step, 
-          t=0, c_s=1.0, Kin=1.0, rhog0=1.0, FB=0, offset=0.0):
-    # ### ### ### Redefine K ### ### ### ### 
+def shock(mach, D_ratio, drag_params, shock_length, shock_step, GAMMA, P_0,
+          t=0, Kin=1.0, rhog0=1.0, FB=0, offset=0.0):
+    c_s = np.sqrt(GAMMA*P_0 / rhog0)
+    
     rhod0 = rhog0*D_ratio
-    rhog0 = mach**2 * rhog0 *(1+0*D_ratio) #changes across boundary
+    rhog0 = rhog0 * (GAMMA+1) / (GAMMA-1)
     
     v_s =  mach * c_s 
-    vg0 = v_s/mach**2
+    vg0 = v_s * (GAMMA-1) / (GAMMA+1)
     
     
     def derivs(z, y):
-        wd = y[0]
+        vd = y[0]
         try:
-            w = gas_velocity(wd, mach, D_ratio)
+            vg = gas_velocity(vd, mach, D_ratio)
         except SolverError:
             return -1
-        rhog = rhog0*vg0/(w*v_s)
-        rhod = rhod0*v_s/(wd*v_s)
+        rhog = rhog0*vg0/(vg*v_s)
+        rhod = rhod0*v_s/(vd*v_s)
         
-        dwdz = -abs(wd -w) *(Kin*rhog/(wd*v_s))
+        
+        
+        dwdz = -abs(vd -vg) *(Kin*rhog/(vd))
         return(dwdz, 0, 0)
             
     ###################################################
     
     
     ###################################################
-    def gas_velocity(wd, mach, D_ratio):
+    def gas_velocity(vd, mach, D_ratio):
+        v_s = c_s*mach
+        A = 1 - 0.5*(GAMMA-1)/GAMMA
+        B = D_ratio*(vd - v_s) - v_s - (P_0/ (rhog0*v_s))
+        C = (GAMMA-1)/GAMMA * ( v_s**2 - 0.5*vd**2) + (P_0 / (rhog0))
         
-        beta = 1.0 + mach**(-2.) + FB*D_ratio*(1. - wd)
-        disc = beta**2 - 4.0/mach**2. #discriminant of quadratic
+        disc = B**2 - 4*A*C
         
         if np.any(disc < 0.0):
             raise SolverError('Error in gas_velocity: no solution for gas velocity')
         
-        w = 0.5*(beta - np.sqrt(disc))
+        w = 0.5*(B - np.sqrt(disc))
         
         return w
     ###################################################
