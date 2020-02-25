@@ -99,6 +99,13 @@ def shock(mach, D_ratio, drag_params, shock_length, shock_step,
         raise Exception('Solver failed. Great error message!')
     
     v_post =v_s/((1+FB*D_ratio)*mach**2)
+    
+    A = (1+D_ratio)
+    B = -(v_s*(1+D_ratio) + c_s**2 / v_s)
+    C = c_s**2
+    v_post_test = (-B - np.sqrt(B**2 - 4*A*C)) / (2*A)
+    
+    print(v_post_test, v_post)
     wg = gas_velocity(wd, mach, D_ratio)
     
     dx = t*v_post
@@ -120,3 +127,5 @@ def shock(mach, D_ratio, drag_params, shock_length, shock_step,
     
     return solution
 
+true = shock(4, 1.0, {'drag_type':'power_law', 'drag_const':1.0}, 10., 1000.,
+                     t=3, FB=1, Kin=1, offset=10)

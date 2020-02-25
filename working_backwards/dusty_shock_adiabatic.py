@@ -29,13 +29,37 @@ class SolverError(Exception):
 def shock(mach, D_ratio, drag_params, shock_length, shock_step, GAMMA, P_0,
           t=0, Kin=1.0, rhog0=1.0, FB=0, offset=0.0):
     c_s = np.sqrt(GAMMA*P_0 / rhog0)
+    v_s =  mach * c_s 
+    
+    v_g0 = v_s * (GAMMA-1) / (GAMMA+1)
+
+    A0 = (GAMMA+1) / (2*GAMMA)
+    B0 = -v_s - P_0 / (rhog0*v_s)
+    C0 = (GAMMA-1)/(2*GAMMA)*v_s**2 + P_0/rhog0
+    
+    vg0 = (-B0 - np.sqrt(B0**2 - 4*A0*C0)) / (2*A0)
+    print(c_s, v_s)
+    print(vg0, v_g0)
+    
+    A = (1+FB*D_ratio)* (GAMMA+1) / (2*GAMMA)
+    B = - ( v_s*(1+FB*D_ratio) + P_0 / (rhog0*v_s))
+    C = (GAMMA-1)/(2*GAMMA) *(v_s**2 * (1+FB*D_ratio) ) + P_0/rhog0
+    
+    v_post = (-B - np.sqrt(B**2 - 4*A*C)) / (2*A)
+    
+    print(v_post, vg0)
     
     rhod0 = rhog0*D_ratio
-    rhog0 = rhog0 * (GAMMA+1) / (GAMMA-1)
     
-    v_s =  mach * c_s 
-    vg0 = v_s * (GAMMA-1) / (GAMMA+1)
+    mg = rhog0*v_s
+    md = rhod0*v_s
     
+    E = 0.5 * v_s**2 * (FB*md+mg) + (GAMMA/(GAMMA-1)) * P_0 * v_s
+    
+    rhog0in = np.copy(rhog0)
+    rhog0 = rhog0 * v_s / vg0
+    
+    print(rhog0, (GAMMA+1)/(GAMMA-1))
     
     def derivs(z, y):
         vd = y[0]
@@ -43,8 +67,8 @@ def shock(mach, D_ratio, drag_params, shock_length, shock_step, GAMMA, P_0,
             vg = gas_velocity(vd, mach, D_ratio)
         except SolverError:
             return -1
-        rhog = rhog0*vg0/(vg*v_s)
-        rhod = rhod0*v_s/(vd*v_s)
+        rhog = rhog0in*v_s/(vg)
+        rhod = rhod0*v_s/(vd)
         
         
         
@@ -56,17 +80,15 @@ def shock(mach, D_ratio, drag_params, shock_length, shock_step, GAMMA, P_0,
     
     ###################################################
     def gas_velocity(vd, mach, D_ratio):
-        v_s = c_s*mach
-        A = 1 - 0.5*(GAMMA-1)/GAMMA
-        B = D_ratio*(vd - v_s) - v_s - (P_0/ (rhog0*v_s))
-        C = (GAMMA-1)/GAMMA * ( v_s**2 - 0.5*vd**2) + (P_0 / (rhog0))
-        
+        A = (GAMMA+1)/(2*GAMMA)
+        B = FB*D_ratio*(vd - v_s) - v_s - P_0 / (rhog0in*v_s)
+        C = (GAMMA-1)/(2*GAMMA) * ( FB*D_ratio*(v_s**2 - vd**2) + v_s**2)  + P_0 / rhog0in
         disc = B**2 - 4*A*C
         
         if np.any(disc < 0.0):
             raise SolverError('Error in gas_velocity: no solution for gas velocity')
         
-        w = 0.5*(B - np.sqrt(disc))
+        w = (-B - np.sqrt(disc)) / (2*A)
         
         return w
     ###################################################
@@ -85,18 +107,18 @@ def shock(mach, D_ratio, drag_params, shock_length, shock_step, GAMMA, P_0,
     ################## SOLVE THE ODES! ###################
     try:         
         if mach > 1.:
-            result = solve_ivp(derivs, [0, shock_length], [1.0, rhog0, rhod0],
+            result = solve_ivp(derivs, [0, shock_length], [v_s, rhog0, rhod0],
                                t_eval = arange(0, shock_length, shock_length/shock_step),
                                method='Radau', atol=1e-14)
             #result = solver.solve(arange(0.0,  shock_length, shock_length/shock_step), [1.])
         else:
-            result = solve_ivp(derivs, [0, shock_length], [(1.0-1e-4), rhog0, rhod0],
+            result = solve_ivp(derivs, [0, shock_length], [(v_s-1e-4), rhog0, rhod0],
                                t_eval = arange(0, shock_length, shock_length/shock_step),
                                method="Radau")
             #result = solver.solve(arange(0.0,  shock_length, shock_length/shock_step), [1.-1.e-2])
                 
         xi = result.t
-        wd = result.y[0]
+        vd = result.y[0]
 
         
         #####################################################################
@@ -104,21 +126,20 @@ def shock(mach, D_ratio, drag_params, shock_length, shock_step, GAMMA, P_0,
         print (' Solver failed:', e)
         raise Exception('Solver failed. Great error message!')
     
-    v_post =v_s/((1+FB*D_ratio)*mach**2)
-    wg = gas_velocity(wd, mach, D_ratio)
+    vg = gas_velocity(vd, mach, D_ratio)
     
     dx = t*v_post
     scaled_x = xi + offset - dx
     
-    rho_g = rhog0*vg0 / (wg*v_s)
-    rho_d = rhod0*v_s / (wd*v_s)
+    rho_g = rhog0*vg0 / (vg)
+    rho_d = rhod0*v_s / (vd)
     
-    P = rho_g * c_s**2
+    P = (GAMMA-1)/GAMMA * ( E - 0.5*(FB*md*vd**2 + mg*vg**2)) / vg
     
     solution={
         'xi': scaled_x,  #shift to match up with our frame
-        'wd': wd*v_s - v_post,
-        'wg': wg*v_s - v_post,
+        'wd': vd - v_post,
+        'wg': vg- v_post,
         'rhog': rho_g,
         'rhod': rho_d,
         'P': P

@@ -487,7 +487,7 @@ def solve_euler(Npts, IC, tout, Ca = 0.5, fixed_v = 0.0, mesh_type = "fixed",
 
 
 
-def init_dusty_shock_Jtype(xc, dust_gas_ratio = 1.0, gravity=0.0, GAMMA=1.0001, FB=1.0, mach=1.1):
+def init_dusty_shock_Jtype_isothermal(xc, dust_gas_ratio = 1.0, gravity=0.0, GAMMA=1.0001, FB=1.0, mach=1.1):
     M = mach
     
     P = 1.0
@@ -497,6 +497,33 @@ def init_dusty_shock_Jtype(xc, dust_gas_ratio = 1.0, gravity=0.0, GAMMA=1.0001, 
     c_s = np.sqrt(P/rho)
     v_s = c_s*M
     v_post = v_s/((1+ FB*dust_gas_ratio)*M**2)
+    
+    dv = v_s - v_post
+    
+    W = np.full([len(xc), NHYDRO], np.nan)
+    W[:, 0] = rho
+    W[:, 1] = dv
+    W[:, 2] = P
+    W[:, 3] = rho_d
+    W[:, 4] = dv
+    return(W)
+    
+def init_dusty_shock_Jtype(xc, dust_gas_ratio = 1.0, gravity=0.0, GAMMA=1.0001, FB=1.0, mach=1.1):
+    M = mach
+    
+    P = 1.0
+    rho = 1.0
+    rho_d = dust_gas_ratio*rho
+    
+    c_s = np.sqrt(GAMMA*P/rho)
+    v_s = c_s*M
+    
+    A = (1+FB*dust_gas_ratio)* (GAMMA+1) / (2*GAMMA)
+    B = - ( v_s*(1+FB*dust_gas_ratio) + P / (rho*v_s))
+    C = (GAMMA-1)/(2*GAMMA) *(v_s**2 * (1+FB*dust_gas_ratio) ) + P/rho
+    
+    v_post = (-B - np.sqrt(B**2 - 4*A*C)) / (2*A)
+    
     
     dv = v_s - v_post
     
@@ -518,6 +545,7 @@ def init_dusty_shock_Ctype(xc, dust_gas_ratio = 1.0, gravity=0.0, GAMMA=1.0001, 
     
     c_s = np.sqrt(P/rho)
     v_s = c_s*M
+    
     v_post = v_s/((1+dust_gas_ratio)*M**2)
     
     dv = v_s - v_post
@@ -537,27 +565,28 @@ def init_dusty_shock_Ctype(xc, dust_gas_ratio = 1.0, gravity=0.0, GAMMA=1.0001, 
 
 
 
-def _test_dusty_shocks_mach(t_final=5.0, Nx=200, Ca=0.2, FB = 0.0, K=0.):
-    machs=  [2, 3, 4, 5, 6, 7, 8, 10.]
+def _test_dusty_shocks_mach(t_final=5.0, Nx=200, Ca=0.2, FB = 1.0, K=10., D = 1.0):
+    machs=  [0.96, 1.1, 2, 3, 5, 10, 20, 40]#, 5, 10, 20, 50]#, 5, 6, 7, 8, 10.]
     times = [3, 3, 2.]#,   5, 6, 8, 8, 10]
-    times = [ 5./m for m in machs ]
+    times = [ 14./m for m in machs ]
     #times = [10 for _ in machs]
     for i in range(0, len(machs)):
         mach = machs[i]
         t_final = times[i]
         x, W = solve_euler(Nx, init_dusty_shock_Jtype, t_final, Ca=Ca,
                            mesh_type = "Lagrangian", b_type = "inflowL_and_reflectR",
-                           dust_gas_ratio = 1.0, GAMMA=1.4, xend=10.0, 
+                           dust_gas_ratio = D, GAMMA=7./5, xend=20.0, 
                            FB=FB, K=K, mach=mach)
         
         f, subs = plt.subplots(3, 1, sharex=True)
         subs[0].plot(x, W[:,1], c="r", label="Gas")
-        #subs[0].plot(x, W[:,4], c="k", label="Dust")
+        subs[0].plot(x, W[:,4], c="k", label="Dust")
         
         
-        true = shock(mach, 1.0, {'drag_type':'power_law', 'drag_const':1.0}, 10., 1000., 
-                     t=t_final, FB=FB, Kin=K, offset=10)
-        #subs[0].plot(true["xi"], true["wd"], c="gray", ls="--", label="True Dust")
+        true = shock(mach, D, {'drag_type':'power_law', 'drag_const':1.0}, 10., 1000., 7./5, 1.0,
+                     t=t_final, FB=FB, Kin=K, offset=19.8)
+        
+        subs[0].plot(true["xi"], true["wd"], c="gray", ls="--", label="True Dust")
         subs[0].plot(true["xi"], true["wg"], c="pink", ls="--", label="True Gas" )
         
         subs[0].set_ylabel("v")
@@ -565,10 +594,10 @@ def _test_dusty_shocks_mach(t_final=5.0, Nx=200, Ca=0.2, FB = 0.0, K=0.):
         f.suptitle("J-type shock, t=" + str(t_final) + ", M=" + str(mach))
        
         subs[1].plot(x, W[:,0], c="r", label="Gas")
-        #subs[1].plot(x, W[:,3], c="k", label="Dust")
+        subs[1].plot(x, W[:,3], c="k", label="Dust")
        
         subs[1].plot(true["xi"], true["rhog"], c="pink", ls="--", label="True Gas")
-        #subs[1].plot(true["xi"], true["rhod"], c="gray", ls="--", label="True Dust")
+        subs[1].plot(true["xi"], true["rhod"], c="gray", ls="--", label="True Dust")
         subs[1].set_ylabel("rho")
         
         subs[2].plot(true['xi'], true['P'], c="pink", ls="--", label="True Pressure")
@@ -596,5 +625,5 @@ if __name__ == "__main__":
     #_test_dusty_shocks(t_final=6)
     
     for t in [2]:#[0.5, 0.55, 0.6, 0.8, 1.0, 2.0, 3.0, 3.6, 4]:
-        _test_dusty_shocks_mach(t_final=t)
+        _test_dusty_shocks_mach(t_final=t, D=0.5)
     plt.show()
