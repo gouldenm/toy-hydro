@@ -3,7 +3,8 @@ import numpy as np
 from dustywave_sol2 import *
 from dust_settling_sol import *
 from dusty_shock_adiabatic import *
-from explicit_euler_solver import *
+#from explicit_euler_solver import *
+from implicit_euler_solver_mid import *
 
 
 def _test_convergence(IC, pmin=4, pmax=10, figs_evol=None, fig_err=None, t_final=3.0, FB=1, 
@@ -378,10 +379,12 @@ def _test_dusty_shocks_mach(t_final=5.0, Nx=200, Ca=0.2, FB = 1.0, K=10., D = 1.
 
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
+    
     _test_convergence(init_wave, 
                       figs_evol=plt.subplots(3, 1)[1],
                       fig_err=plt.subplots(1)[1],
-                      t_final = 3.0)
+                      t_final = 1.0,
+                      FB=1)
     
     #_test_sod(t_final=0.2, Nx=569)
     
