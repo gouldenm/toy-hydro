@@ -45,8 +45,6 @@ def shock(mach, D_ratio, drag_params, shock_length, shock_step, GAMMA, P_0,
     
     v_post = (-B - np.sqrt(B**2 - 4*A*C)) / (2*A)
     
-    print(v_post, vg0)
-    
     rhod0 = rhog0*D_ratio
     
     mg = rhog0*v_s

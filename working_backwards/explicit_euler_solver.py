@@ -5,7 +5,7 @@ from dust_settling_sol import *
 from dusty_shock_adiabatic import *
 
 NHYDRO = 5
-HLLC = True
+HLLC = False
 plot_every_step = None#True
 
 class Arepo2(object):
@@ -57,7 +57,7 @@ def prim2cons(W, GAMMA, FB):
     U = np.full((len(W), NHYDRO), np.nan) #conserved state vector
     U[:,0] = W[:,0] #gas density
     U[:,1] = W[:,0]*W[:,1] #gas momentum
-    U[:,2] = W[:,2]/(GAMMA-1) + (W[:,0]*W[:,1]**2)/2.    + FB*(W[:,3]*W[:,4]**2)/2.   #gas energy + dust KE
+    U[:,2] = W[:,2]/(GAMMA-1) + (W[:,0]*W[:,1]**2)/2.    #+ FB*(W[:,3]*W[:,4]**2)/2.   #gas energy + dust KE
     U[:,3] = W[:,3]                                        #dust density
     U[:,4] = W[:,3]*W[:,4]                             #dust momentum
     return(U)
@@ -66,7 +66,7 @@ def cons2prim(U, GAMMA, FB):
     W = np.full((len(U), NHYDRO), np.nan) #primitive state vector
     W[:,0] = U[:,0] #gas density
     W[:,1] = U[:,1]/U[:,0] #gas velocity
-    W[:,2] = (GAMMA-1)*(U[:,2] - (U[:,1]**2/U[:,0])/2.   - FB*(U[:,4]**2/U[:,3])/2. )  #gas pressure
+    W[:,2] = (GAMMA-1)*(U[:,2] - (U[:,1]**2/U[:,0])/2.)   #- FB*(U[:,4]**2/U[:,3])/2. )  #gas pressure
     W[:,3] = U[:,3]                                     #dust density
     W[:,4] = U[:,4]/U[:,3]                             #dust velocity
     return(W)
@@ -75,8 +75,8 @@ def prim2flux(W, GAMMA, FB):
     F = np.full((len(W), NHYDRO), np.nan)
     F[:,0] = W[:,0]*W[:,1] #mass flux
     F[:,1] = W[:,0]*W[:,1]**2 + W[:,2] #momentum flux
-    F[:,2] = W[:,1] * (W[:,2]/(GAMMA-1) + (W[:,0]*W[:,1]**2)/2 + W[:,2]) \
-             +  FB* W[:,4] * (W[:,3]*W[:,4]**2)/2.                 #gas energy flux + dust energy flux
+    F[:,2] = W[:,1] * (W[:,2]/(GAMMA-1) + (W[:,0]*W[:,1]**2)/2 + W[:,2])# \
+             #+  FB* W[:,4] * (W[:,3]*W[:,4]**2)/2.                 #gas energy flux + dust energy flux
     F[:,3] = W[:,3]*W[:,4]                                                  #dust mass flux
     F[:,4] = W[:,3]*W[:,4]**2                                              #dust momentum flux
     return(F)
@@ -132,7 +132,7 @@ def HLL_solve(WLin, WRin, vf, GAMMA, FB):
     # Correct to lab frame
     fHLL_lab = np.copy(fHLL)
     fHLL_lab[:,1] += fHLL[:,0]*vf
-    fHLL_lab[:,2] += 0.5*(fHLL[:,0] + FB*fHLL[:,3])*vf**2 + (fHLL[:,1]+FB*fHLL[:,4])*vf
+    fHLL_lab[:,2] += 0.5*fHLL[:,0]*vf**2 + fHLL[:,1]*vf # + FB*fHLL[:,3]*vf**2 + +FB*fHLL[:,4]*vf
     fHLL_lab[:,4] += fHLL[:,3]*vf
     
     return fHLL_lab
@@ -218,7 +218,7 @@ def HLLC_solve(WLin, WRin, vf, GAMMA, FB):
     # Correct to lab frame
     fHLL_lab = np.copy(fHLL)
     fHLL_lab[:,1] += fHLL[:,0]*vf
-    fHLL_lab[:,2] += 0.5*(fHLL[:,0] + FB*fHLL[:,3])*vf**2 + (fHLL[:,1]+FB*fHLL[:,4])*vf
+    fHLL_lab[:,2] += 0.5*fHLL[:,0]*vf**2 + fHLL[:,1]*vf # + FB*fHLL[:,3]*vf**2 + +FB*fHLL[:,4]*vf
     fHLL_lab[:,4] += fHLL[:,3]*vf
     
     return fHLL_lab
@@ -428,6 +428,11 @@ def solve_euler(Npts, IC, tout, Ca = 0.5, fixed_v = 0.0, mesh_type = "fixed",
         Ws[:,1] += FB*K*rho_d*(Wb[:, 4] - Wb[:, 1])*dt
         Ws[:,4] -=    K*rho_g*(Wb[:, 4] - Wb[:, 1])*dt       #dust
         
+        # Heating due to drag
+        dEk = 0.5*(Ws[:,0]*Ws[:,1]**2 - Ws0[:,0]*Ws0[:,1]**2 +
+                   Ws[:,3]*Ws[:,4]**2 - Ws0[:,3]*Ws0[:,4]**2)
+        Ws[:,2] -= dEk * (GAMMA-1)
+        
         #8c. Include constant gravity term, if applicable
         Ws[:,1] += gravity*dt #either 0.0 or 1.0
         Ws[:,4] += gravity*dt        
@@ -443,16 +448,14 @@ def solve_euler(Npts, IC, tout, Ca = 0.5, fixed_v = 0.0, mesh_type = "fixed",
         F1 = dt*np.diff(flux_1, axis=0)
         
         # 10. Time average fluxes (both used dt, so just *0.5)
-        Qold = np.copy(Q)
-        
         flux = - 0.5*(F1+F0)
-        Q = Qold + flux
+        Qn = Q + flux
         
-        Utemp = Q/dx[1:-1].reshape(-1,1)
+        Utemp = Qn/dx[1:-1].reshape(-1,1)
         
         #10a. Recompute Q for gas / dust momenta...
-        p_g = Qold[:,1].copy()
-        p_d = Qold[:,4].copy()
+        p_g = Q[:,1].copy()
+        p_d = Q[:,4].copy()
         f_g = flux[:,1].copy()
         f_d = flux[:,4].copy()
         rho_d = Utemp[:,0].copy()
@@ -461,13 +464,19 @@ def solve_euler(Npts, IC, tout, Ca = 0.5, fixed_v = 0.0, mesh_type = "fixed",
         eps_g = rho_g / rho 
         eps_d = rho_d / rho 
         
-        dp_0 = K*dt*(Qold[:,0]*Qold[:,4] - Qold[:,3]*Qold[:,1])/dxold[1:-1].reshape(-1)
-        dp_1 = K*dt*(Q[:,0]*Q[:,4] - Q[:,3]*Q[:,1])/dx[1:-1].reshape(-1)
+        dp_0 = K*dt*(Q[:,0]*Q[:,4] - Q[:,3]*Q[:,1])/dxold[1:-1].reshape(-1)
+        dp_1 = K*dt*(Qn[:,0]*Qn[:,4] - Qn[:,3]*Qn[:,1])/dx[1:-1].reshape(-1)
         
         dp = 0.5*(dp_0 + dp_1)
         
+        Q[:] = np.copy(Qn)
+        
         Q[:,4] -= dp
         Q[:,1] += FB*dp
+        
+        # Heating due to drag to conserve energy
+        if FB:
+            Q[:,2] -= 0.5*(Q[:,4]**2 - Qn[:,4]**2) / Q[:,3]
         
         # Include const gravity term
         Q[:,4] += gravity*dt*Q[:,3]

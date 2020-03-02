@@ -7,7 +7,7 @@ from explicit_euler_solver import *
 #from implicit_euler_solver_mid import *
 
 
-def _test_convergence(IC, pmin=4, pmax=10, figs_evol=None, fig_err=None, t_final=3.0, FB=1, 
+def _test_convergence(IC, pmin=4, pmax=9, figs_evol=None, fig_err=None, t_final=3.0, FB=1, 
                       GAMMA=5./3., K=0.1):
     N = 2**np.arange(pmin, pmax+1)
     scheme = Arepo2
@@ -19,7 +19,7 @@ def _test_convergence(IC, pmin=4, pmax=10, figs_evol=None, fig_err=None, t_final
         print (scheme.__name__, Ni)
         _, W0 = solve_euler(Ni, IC, 0, Ca = 0.4, mesh_type = "fixed", FB=FB, K=K, GAMMA=GAMMA)
         x, W = solve_euler(Ni, IC, t_final, Ca = 0.4, mesh_type = "fixed", FB=FB, K=K, GAMMA=GAMMA)
-        true = IC(x, t=t_final)
+        true = IC(x, K, t=t_final)
         if figs_evol is not None:
             c = figs_evol[0].plot(x, W[:,0], c=c, 
                                   label="gas")[0].get_color()
@@ -214,7 +214,6 @@ def analytical_dustybox_feedback(t, K, dust_gas_ratio=1.0):
     
     p_dust_out = p_g*(ed-ed*exp) + p_d*(ed+eg*exp)
     v_dust_out = p_dust_out / rho_d
-    print(v_dust_out)
     return(v_dust_out)
 
 
@@ -331,8 +330,6 @@ def init_dusty_shock_Jtype(xc, K, dust_gas_ratio = 1.0, gravity=0.0, GAMMA=1.000
     
     dv = v_s - v_post
     
-    print(v_s, v_post, dv)
-    
     W = np.full([len(xc), NHYDRO], np.nan)
     W[:, 0] = rho
     W[:, 1] = v_s
@@ -349,8 +346,7 @@ def init_dusty_shock_Jtype(xc, K, dust_gas_ratio = 1.0, gravity=0.0, GAMMA=1.000
 
 
 def _test_dusty_shocks_mach(t_final=5.0, Nx=200, Ca=0.2, FB = 1.0, K=1000., D = 1.0, GAMMA=7./5., extent=30):
-    machs=  [10]#, 20, 40]#, 5, 10, 20, 50]#, 5, 6, 7, 8, 10.]
-    times = [3, 3, 2.]#,   5, 6, 8, 8, 10]
+    machs=  [2.5, 2.9]#, 20, 40]#, 5, 10, 20, 50]#, 5, 6, 7, 8, 10.]
     times = [ t_final*10./m for m in machs ]
     #times = [10 for _ in machs]
     for i in range(0, len(machs)):
@@ -358,7 +354,7 @@ def _test_dusty_shocks_mach(t_final=5.0, Nx=200, Ca=0.2, FB = 1.0, K=1000., D = 
         print(mach)
         t_final = times[i]
         x, W = solve_euler(Nx, init_dusty_shock_Jtype, t_final, Ca=Ca,
-                           mesh_type = "fixed", b_type = "flow",
+                           mesh_type = "Lagrangian", b_type = "flow",
                            dust_gas_ratio = D, GAMMA=GAMMA, xend=extent, 
                            FB=FB, K=K, mach=mach)
         
@@ -398,7 +394,7 @@ if __name__ == "__main__":
                       figs_evol=plt.subplots(3, 1)[1],
                       fig_err=plt.subplots(1)[1],
                       t_final = 1.0,
-                      FB=1, GAMMA=1.5, K=1000.)
+                      FB=1, GAMMA=1.5, K=1.)
     """
     #_test_sod(t_final=0.2, Nx=569)
     
@@ -409,7 +405,7 @@ if __name__ == "__main__":
     #_test_const_gravity()
     
     #_test_dusty_shocks(t_final=6)
-    for t in [0.01, 0.1, 0.2, 0.3, 0.5, 1.0, 2.0, 5.0, 10.]:
+    for t in [0.01, 0.015, 1.0]:
         _test_dusty_shocks_mach(t_final=t, D=0.5, K=3., Nx=500, FB=1, GAMMA=7./5, extent=40)
     plt.show()
 
