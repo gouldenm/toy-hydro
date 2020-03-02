@@ -124,7 +124,7 @@ def shock(mach, D_ratio, drag_params, shock_length, shock_step, GAMMA, P_0,
     vg = gas_velocity(vd, mach, D_ratio)
     
     #### for steady solution only:
-    v_post = 0
+    #v_post = 0
     
     dx = t*v_post
     scaled_x = xi + offset - dx

@@ -332,21 +332,22 @@ def init_dusty_shock_Jtype(xc, K, dust_gas_ratio = 1.0, gravity=0.0, GAMMA=1.000
     
     W = np.full([len(xc), NHYDRO], np.nan)
     W[:, 0] = rho
-    W[:, 1] = v_s
+    W[:, 1] = dv
     W[:, 2] = P
     W[:, 3] = rho_d
-    W[:, 4] = v_s
+    W[:, 4] = dv
     
+    """
     W[halfNx:, 0] = true["rhog"]
     W[halfNx:, 1] = true["wg"]
     W[halfNx:, 2] = true["P"]
     W[halfNx:, 3] = true["rhod"]
-    W[halfNx:, 4] = true["wd"]
+    W[halfNx:, 4] = true["wd"]"""
     return(W)
 
 
 def _test_dusty_shocks_mach(t_final=5.0, Nx=200, Ca=0.2, FB = 1.0, K=1000., D = 1.0, GAMMA=7./5., extent=30):
-    machs=  [2.5, 2.9]#, 20, 40]#, 5, 10, 20, 50]#, 5, 6, 7, 8, 10.]
+    machs=  [10]#, 20, 40]#, 5, 10, 20, 50]#, 5, 6, 7, 8, 10.]
     times = [ t_final*10./m for m in machs ]
     #times = [10 for _ in machs]
     for i in range(0, len(machs)):
@@ -354,7 +355,7 @@ def _test_dusty_shocks_mach(t_final=5.0, Nx=200, Ca=0.2, FB = 1.0, K=1000., D = 
         print(mach)
         t_final = times[i]
         x, W = solve_euler(Nx, init_dusty_shock_Jtype, t_final, Ca=Ca,
-                           mesh_type = "Lagrangian", b_type = "flow",
+                           mesh_type = "Lagrangian", b_type = "inflowL_and_reflectR",
                            dust_gas_ratio = D, GAMMA=GAMMA, xend=extent, 
                            FB=FB, K=K, mach=mach)
         
@@ -364,7 +365,7 @@ def _test_dusty_shocks_mach(t_final=5.0, Nx=200, Ca=0.2, FB = 1.0, K=1000., D = 
         
         
         true = shock(mach, D, {'drag_type':'power_law', 'drag_const':1.0}, 10., 1000., GAMMA, 1.0,
-                     t=t_final, FB=FB, Kin=K, offset=extent/2)
+                     t=t_final, FB=FB, Kin=K, offset=extent - 0.04)
         
         subs[0].plot(true["xi"], true["wd"], c="gray", ls="--", label="True Dust")
         subs[0].plot(true["xi"], true["wg"], c="pink", ls="--", label="True Gas" )
@@ -405,8 +406,8 @@ if __name__ == "__main__":
     #_test_const_gravity()
     
     #_test_dusty_shocks(t_final=6)
-    for t in [0.01, 0.015, 1.0]:
-        _test_dusty_shocks_mach(t_final=t, D=0.5, K=3., Nx=500, FB=1, GAMMA=7./5, extent=40)
+    for t in [2.5]:
+        _test_dusty_shocks_mach(t_final=t, D=0.5, K=3., Nx=1000, FB=1, GAMMA=7./5, extent=40)
     plt.show()
 
 

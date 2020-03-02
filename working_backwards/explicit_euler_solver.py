@@ -5,7 +5,7 @@ from dust_settling_sol import *
 from dusty_shock_adiabatic import *
 
 NHYDRO = 5
-HLLC = False
+HLLC = True
 plot_every_step = None#True
 
 class Arepo2(object):
@@ -28,7 +28,7 @@ class Arepo2(object):
         Qm = Q[:-2]
         Q0 = Q[1:-1]
         Qp = Q[2:]
-        limit = 1.0
+        limit = 2.0
         Qmax = np.maximum(np.maximum(Qp, Qm), Q0)
         Qmin = np.minimum(np.minimum(Qp, Qm), Q0)
         
@@ -57,7 +57,7 @@ def prim2cons(W, GAMMA, FB):
     U = np.full((len(W), NHYDRO), np.nan) #conserved state vector
     U[:,0] = W[:,0] #gas density
     U[:,1] = W[:,0]*W[:,1] #gas momentum
-    U[:,2] = W[:,2]/(GAMMA-1) + (W[:,0]*W[:,1]**2)/2.    #+ FB*(W[:,3]*W[:,4]**2)/2.   #gas energy + dust KE
+    U[:,2] = W[:,2]/(GAMMA-1) + (W[:,0]*W[:,1]**2)/2.    + FB*(W[:,3]*W[:,4]**2)/2.   #gas energy + dust KE
     U[:,3] = W[:,3]                                        #dust density
     U[:,4] = W[:,3]*W[:,4]                             #dust momentum
     return(U)
@@ -66,7 +66,7 @@ def cons2prim(U, GAMMA, FB):
     W = np.full((len(U), NHYDRO), np.nan) #primitive state vector
     W[:,0] = U[:,0] #gas density
     W[:,1] = U[:,1]/U[:,0] #gas velocity
-    W[:,2] = (GAMMA-1)*(U[:,2] - (U[:,1]**2/U[:,0])/2.)   #- FB*(U[:,4]**2/U[:,3])/2. )  #gas pressure
+    W[:,2] = (GAMMA-1)*(U[:,2] - (U[:,1]**2/U[:,0])/2.   - FB*(U[:,4]**2/U[:,3])/2. )  #gas pressure
     W[:,3] = U[:,3]                                     #dust density
     W[:,4] = U[:,4]/U[:,3]                             #dust velocity
     return(W)
@@ -75,7 +75,7 @@ def prim2flux(W, GAMMA, FB):
     F = np.full((len(W), NHYDRO), np.nan)
     F[:,0] = W[:,0]*W[:,1] #mass flux
     F[:,1] = W[:,0]*W[:,1]**2 + W[:,2] #momentum flux
-    F[:,2] = W[:,1] * (W[:,2]/(GAMMA-1) + (W[:,0]*W[:,1]**2)/2 + W[:,2])# \
+    F[:,2] = W[:,1] * (W[:,2]/(GAMMA-1) + (W[:,0]*W[:,1]**2)/2 + W[:,2]) #\
              #+  FB* W[:,4] * (W[:,3]*W[:,4]**2)/2.                 #gas energy flux + dust energy flux
     F[:,3] = W[:,3]*W[:,4]                                                  #dust mass flux
     F[:,4] = W[:,3]*W[:,4]**2                                              #dust momentum flux
@@ -117,22 +117,21 @@ def HLL_solve(WLin, WRin, vf, GAMMA, FB):
     ld = (np.sqrt(WL[:,3])*WL[:,4] + np.sqrt(WR[:,3])*WR[:,4]) / (np.sqrt(WL[:,3]) + np.sqrt(WR[:,3]))
     
     #   Calculate DUST flux in frame of face (note if vL < 0 < vR, then fHLL = 0.)
-    indexL = (ld > 1e-15) & np.logical_not(((WL[:,4] < 0) & (WR[:,4] > 0)))
-    indexC = (np.abs(ld) < 1e-15 ) & np.logical_not(((WL[:,4] < 0) & (WR[:,4] > 0)))
-    indexR = (ld < -1e-15) & np.logical_not(((WL[:,4] < 0) & (WR[:,4] > 0)))
-    fHLL[indexL,3:] = fL[indexL,3:]
-    fHLL[indexC,3:] = (fL[indexC,3:] + fR[indexC,3:])/2.
-    fHLL[indexR,3:] = fR[indexR,3:]
-    
     w_f = ld.reshape(-1,1)
     f_dust = w_f*np.where(w_f > 0, UL[:,3:], UR[:,3:]) 
-    
     fHLL[:, 3:] = f_dust
+    
+    #   ### Compute change in energy due to dust KE flux... ###
+    F_dust_energy_L = FB* (WL[:,3]*WL[:,4]**2)/2.
+    F_dust_energy_R = FB* (WR[:,3]*WR[:,4]**2)/2.
+    F_dust_energy = ld*np.where(ld >0, F_dust_energy_L, F_dust_energy_R)
+    
+    fHLL[:,2] += F_dust_energy
     
     # Correct to lab frame
     fHLL_lab = np.copy(fHLL)
     fHLL_lab[:,1] += fHLL[:,0]*vf
-    fHLL_lab[:,2] += 0.5*fHLL[:,0]*vf**2 + fHLL[:,1]*vf # + FB*fHLL[:,3]*vf**2 + +FB*fHLL[:,4]*vf
+    fHLL_lab[:,2] += 0.5*(fHLL[:,0] + FB*fHLL[:,3])*vf**2 + (fHLL[:,1]+FB*fHLL[:,4])*vf
     fHLL_lab[:,4] += fHLL[:,3]*vf
     
     return fHLL_lab
@@ -202,23 +201,23 @@ def HLLC_solve(WLin, WRin, vf, GAMMA, FB):
     #    Calculate signal speed for dust
     ld = (np.sqrt(WL[:,3])*WL[:,4] + np.sqrt(WR[:,3])*WR[:,4]) / (np.sqrt(WL[:,3]) + np.sqrt(WR[:,3]))
     
-    #   Calculate DUST flux in frame of face (note if vL < 0 < vR, then fHLL = 0.)
-    indexL = (ld > 1e-15) & np.logical_not(((WL[:,4] < 0) & (WR[:,4] > 0)))
-    indexC = (np.abs(ld) < 1e-15 ) & np.logical_not(((WL[:,4] < 0) & (WR[:,4] > 0)))
-    indexR = (ld < -1e-15) & np.logical_not(((WL[:,4] < 0) & (WR[:,4] > 0)))
-    fHLL[indexL,3:] = fL[indexL,3:]
-    fHLL[indexC,3:] = (fL[indexC,3:] + fR[indexC,3:])/2.
-    fHLL[indexR,3:] = fR[indexR,3:]
-    
+    #   Calculate DUST flux in frame of face
     w_f = ld.reshape(-1,1)
     f_dust = w_f*np.where(w_f > 0, UL[:,3:], UR[:,3:]) 
     
     fHLL[:, 3:] = f_dust
     
+    #   ### Compute change in energy due to dust KE flux... ###
+    F_dust_energy_L = FB* (WL[:,3]*WL[:,4]**2)/2.
+    F_dust_energy_R = FB* (WR[:,3]*WR[:,4]**2)/2.
+    F_dust_energy = ld*np.where(ld >0, F_dust_energy_L, F_dust_energy_R)
+    
+    fHLL[:,2] += F_dust_energy
+    
     # Correct to lab frame
     fHLL_lab = np.copy(fHLL)
     fHLL_lab[:,1] += fHLL[:,0]*vf
-    fHLL_lab[:,2] += 0.5*fHLL[:,0]*vf**2 + fHLL[:,1]*vf # + FB*fHLL[:,3]*vf**2 + +FB*fHLL[:,4]*vf
+    fHLL_lab[:,2] += 0.5*(fHLL[:,0] + FB*fHLL[:,3])*vf**2 + (fHLL[:,1]+FB*fHLL[:,4])*vf
     fHLL_lab[:,4] += fHLL[:,3]*vf
     
     return fHLL_lab
@@ -376,7 +375,7 @@ def solve_euler(Npts, IC, tout, Ca = 0.5, fixed_v = 0.0, mesh_type = "fixed",
         subs[4].set_ylabel('Dust velocity')
     
     while t < tout:
-        #print(t)
+        print(t)
         # 0) Calculate new timestep
         dtmax = Ca * min(dx) / max_wave_speed(U, GAMMA, FB)
         dt = min(dtmax, tout-t)
@@ -420,18 +419,12 @@ def solve_euler(Npts, IC, tout, Ca = 0.5, fixed_v = 0.0, mesh_type = "fixed",
         dWdt = time_diff_W(Wb, gradW, vc[1:-1])
         
         #8b. predict cell centre, INCLUDING DRAG
-        Ws = boundary(W)[1:-1] + dWdt*dt
-        Ws0 = boundary(W)[1:-1] + dWdt*dt
-        
-        rho_d = Wb[:, 3]
-        rho_g = Wb[:, 0]
-        Ws[:,1] += FB*K*rho_d*(Wb[:, 4] - Wb[:, 1])*dt
-        Ws[:,4] -=    K*rho_g*(Wb[:, 4] - Wb[:, 1])*dt       #dust
-        
-        # Heating due to drag
-        dEk = 0.5*(Ws[:,0]*Ws[:,1]**2 - Ws0[:,0]*Ws0[:,1]**2 +
-                   Ws[:,3]*Ws[:,4]**2 - Ws0[:,3]*Ws0[:,4]**2)
-        Ws[:,2] -= dEk * (GAMMA-1)
+        Ws = boundary(W)[1:-1]
+        rho_d = Ws[:, 3]
+        rho_g = Ws[:, 0]
+        Ws[:,1] += FB*K*rho_d*(Ws[:, 4] - Ws[:, 1])*dt
+        Ws[:,4] -=    K*rho_g*(Ws[:, 4] - Ws[:, 1])*dt       #dust
+        Ws += dWdt*dt
         
         #8c. Include constant gravity term, if applicable
         Ws[:,1] += gravity*dt #either 0.0 or 1.0
@@ -448,14 +441,16 @@ def solve_euler(Npts, IC, tout, Ca = 0.5, fixed_v = 0.0, mesh_type = "fixed",
         F1 = dt*np.diff(flux_1, axis=0)
         
         # 10. Time average fluxes (both used dt, so just *0.5)
-        flux = - 0.5*(F1+F0)
-        Qn = Q + flux
+        Qold = np.copy(Q)
         
-        Utemp = Qn/dx[1:-1].reshape(-1,1)
+        flux = - 0.5*(F1+F0)
+        Q = Qold + flux
+        
+        Utemp = Q/dx[1:-1].reshape(-1,1)
         
         #10a. Recompute Q for gas / dust momenta...
-        p_g = Q[:,1].copy()
-        p_d = Q[:,4].copy()
+        p_g = Qold[:,1].copy()
+        p_d = Qold[:,4].copy()
         f_g = flux[:,1].copy()
         f_d = flux[:,4].copy()
         rho_d = Utemp[:,0].copy()
@@ -464,19 +459,13 @@ def solve_euler(Npts, IC, tout, Ca = 0.5, fixed_v = 0.0, mesh_type = "fixed",
         eps_g = rho_g / rho 
         eps_d = rho_d / rho 
         
-        dp_0 = K*dt*(Q[:,0]*Q[:,4] - Q[:,3]*Q[:,1])/dxold[1:-1].reshape(-1)
-        dp_1 = K*dt*(Qn[:,0]*Qn[:,4] - Qn[:,3]*Qn[:,1])/dx[1:-1].reshape(-1)
+        dp_0 = K*dt*(Qold[:,0]*Qold[:,4] - Qold[:,3]*Qold[:,1])/dxold[1:-1].reshape(-1)
+        dp_1 = K*dt*(Q[:,0]*Q[:,4] - Q[:,3]*Q[:,1])/dx[1:-1].reshape(-1)
         
         dp = 0.5*(dp_0 + dp_1)
         
-        Q[:] = np.copy(Qn)
-        
         Q[:,4] -= dp
         Q[:,1] += FB*dp
-        
-        # Heating due to drag to conserve energy
-        if FB:
-            Q[:,2] -= 0.5*(Q[:,4]**2 - Qn[:,4]**2) / Q[:,3]
         
         # Include const gravity term
         Q[:,4] += gravity*dt*Q[:,3]
