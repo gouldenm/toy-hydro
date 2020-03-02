@@ -7,49 +7,35 @@ NHYDRO = 5
 HLLC = True
 plot_every_step = None#True
 
-class Arepo2(object):
-    """Second-order reconstruction as in AREPO."""
-    STENCIL = 2
-    ORDER = 2
-    def __init__(self, xc, m):
-        if m != 0:
-            raise ValueError("Arepo2 assumes m = 0")
+def reconstruct(Q, xc):
+    dx = xc[2:] - xc[:-2]
+    xe = 0.5*(xc[1:] + xc[:-1])
+    """Reconstruct the left/right states"""
+    Qm = Q[:-2]
+    Q0 = Q[1:-1]
+    Qp = Q[2:]
+    limit = 2.0
+    Qmax = np.maximum(np.maximum(Qp, Qm), Q0)
+    Qmin = np.minimum(np.minimum(Qp, Qm), Q0)
+    
+    #Not the least squares estimate, but what is used in AREPO code release
+    grad = (Qp - Qm) / dx.reshape(-1,1)
+    dQ = limit*grad*(xe[1:] - xc[1:-1]).reshape(-1,1)
+    Qp = Q0 + dQ
 
-        self._xc = xc
-        #### self._xc = xc = compute_centroids(xe, m)
-        self._dx = xc[2:] - xc[:-2]
-        self._xe = 0.5*(xc[1:] + xc[:-1])
-
-    def reconstruct(self, Q, xc):
-        dx = xc[2:] - xc[:-2]
-        xe = 0.5*(xc[1:] + xc[:-1])
-        """Reconstruct the left/right states"""
-        Qm = Q[:-2]
-        Q0 = Q[1:-1]
-        Qp = Q[2:]
-        limit = 2.0
-        Qmax = np.maximum(np.maximum(Qp, Qm), Q0)
-        Qmin = np.minimum(np.minimum(Qp, Qm), Q0)
+    pos = Qp > Qmax ; neg = Qp < Qmin
+    phir = np.where(pos, (Qmax - Q0)/dQ, np.where(neg, (Qmin - Q0)/dQ, 1))
         
-        #Not the least squares estimate, but what is used in AREPO code release
-        grad = (Qp - Qm) / dx.reshape(-1,1)
+    dQ = limit*grad*(xe[0:-1] - xc[1:-1]).reshape(-1,1)
+    Qm = Q0 + dQ
 
-        dQ = limit*grad*(xe[1:] - xc[1:-1]).reshape(-1,1)
-        Qp = Q0 + dQ
+    pos = Qm > Qmax ; neg = Qm < Qmin
+    phil = np.where(pos, (Qmax - Q0)/dQ, np.where(neg, (Qmin - Q0)/dQ, 1))
 
-        pos = Qp > Qmax ; neg = Qp < Qmin
-        phir = np.where(pos, (Qmax - Q0)/dQ, np.where(neg, (Qmin - Q0)/dQ, 1))
-        
-        dQ = limit*grad*(xe[0:-1] - xc[1:-1]).reshape(-1,1)
-        Qm = Q0 + dQ
-
-        pos = Qm > Qmax ; neg = Qm < Qmin
-        phil = np.where(pos, (Qmax - Q0)/dQ, np.where(neg, (Qmin - Q0)/dQ, 1))
-
-        alpha = np.maximum(0, np.minimum(1, np.minimum(phir, phil)))
-        grad *= alpha
-        
-        return grad
+    alpha = np.maximum(0, np.minimum(1, np.minimum(phir, phil)))
+    grad *= alpha
+    
+    return grad
 
 
 def prim2cons(W, GAMMA, FB):
@@ -249,9 +235,8 @@ def solve_euler(Npts, IC, tout, Ca = 0.5, fixed_v = 0.0, mesh_type = "fixed",
     
     """Test schemes using an Explicit TVD RK integration"""
     # Setup up the grid
-    reconstruction = Arepo2
-    stencil = reconstruction.STENCIL
-    order = reconstruction.ORDER
+    stencil = 2
+    order = 2
     
     shape = Npts + 2*stencil
     dx0 = xend / Npts
@@ -259,7 +244,6 @@ def solve_euler(Npts, IC, tout, Ca = 0.5, fixed_v = 0.0, mesh_type = "fixed",
     dx = (xc[2:] - xc[:-2])*0.5
     
     # Reconstruction function:
-    R = reconstruction(xc, 0)
     
     
     def boundary(Q):
@@ -387,7 +371,7 @@ def solve_euler(Npts, IC, tout, Ca = 0.5, fixed_v = 0.0, mesh_type = "fixed",
         Wb = cons2prim(Ub, GAMMA, FB)
         
         #3+4 Compute Gradients (and reconstruct the edge states)
-        gradW = R.reconstruct(Wb, xc)
+        gradW = reconstruct(Wb, xc)
         
         xe = 0.5*(xc[1:] + xc[:-1])
         Wm = Wb[1:-1] + gradW*(xe[0:-1] - xc[1:-1]).reshape(-1,1)
@@ -569,5 +553,5 @@ def _test_dusty_shocks_mach(t_final=5.0, Nx=200, Ca=0.2, FB = 1.0, K=1000., D = 
 
 if __name__ == "__main__":
     for t in [2.5]:
-        _test_dusty_shocks_mach(t_final=t, D=0.5, K=3., Nx=50, FB=1, GAMMA=7./5, extent=40)
+        _test_dusty_shocks_mach(t_final=t, D=0.5, K=3., Nx=200, FB=1, GAMMA=7./5, extent=40)
     plt.show()
