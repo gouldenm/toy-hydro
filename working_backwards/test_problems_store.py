@@ -407,7 +407,7 @@ if __name__ == "__main__":
     
     #_test_dusty_shocks(t_final=6)
     for t in [2.5]:
-        _test_dusty_shocks_mach(t_final=t, D=0.5, K=3., Nx=1000, FB=1, GAMMA=7./5, extent=40)
+        _test_dusty_shocks_mach(t_final=t, D=0.5, K=3., Nx=500, FB=1, GAMMA=7./5, extent=40)
     plt.show()
 
 
