@@ -248,6 +248,8 @@ def solve_euler(Npts, IC, tout, Ca = 0.5, fixed_v = 0.0, mesh_type = "fixed",
         HLL_solver = HLLC_solve
     else:
         HLL_solver = HLL_solve
+    
+    """Test schemes using an Explicit TVD RK integration"""
     # Setup up the grid
     reconstruction = Arepo2
     stencil = reconstruction.STENCIL
@@ -357,7 +359,7 @@ def solve_euler(Npts, IC, tout, Ca = 0.5, fixed_v = 0.0, mesh_type = "fixed",
     
     #########################################################################################
     # Set the initial conditions
-    W = IC(xc[stencil:-stencil], dust_gas_ratio= dust_gas_ratio, 
+    W = IC(xc[stencil:-stencil], K, dust_gas_ratio= dust_gas_ratio, 
            gravity=gravity, GAMMA=GAMMA, FB=FB, mach=mach)
     U = prim2cons(W, GAMMA, FB)
     Q = U * dx[1:-1].reshape(-1,1)
@@ -374,7 +376,7 @@ def solve_euler(Npts, IC, tout, Ca = 0.5, fixed_v = 0.0, mesh_type = "fixed",
         subs[4].set_ylabel('Dust velocity')
     
     while t < tout:
-        print(t)
+        #print(t)
         # 0) Calculate new timestep
         dtmax = Ca * min(dx) / max_wave_speed(U, GAMMA, FB)
         dt = min(dtmax, tout-t)
@@ -418,12 +420,13 @@ def solve_euler(Npts, IC, tout, Ca = 0.5, fixed_v = 0.0, mesh_type = "fixed",
         dWdt = time_diff_W(Wb, gradW, vc[1:-1])
         
         #8b. predict cell centre, INCLUDING DRAG
-        Ws = boundary(W)[1:-1]
-        rho_d = Ws[:, 3]
-        rho_g = Ws[:, 0]
-        Ws[:,1] += FB*K*rho_d*(Ws[:, 4] - Ws[:, 1])*dt
-        Ws[:,4] -=    K*rho_g*(Ws[:, 4] - Ws[:, 1])*dt       #dust
-        Ws += dWdt*dt
+        Ws = boundary(W)[1:-1] + dWdt*dt
+        Ws0 = boundary(W)[1:-1] + dWdt*dt
+        
+        rho_d = Wb[:, 3]
+        rho_g = Wb[:, 0]
+        Ws[:,1] += FB*K*rho_d*(Wb[:, 4] - Wb[:, 1])*dt
+        Ws[:,4] -=    K*rho_g*(Wb[:, 4] - Wb[:, 1])*dt       #dust
         
         #8c. Include constant gravity term, if applicable
         Ws[:,1] += gravity*dt #either 0.0 or 1.0
@@ -481,5 +484,3 @@ def solve_euler(Npts, IC, tout, Ca = 0.5, fixed_v = 0.0, mesh_type = "fixed",
         t = min(tout, t+dt)
     xc = xc[stencil:-stencil]
     return xc, cons2prim(U, GAMMA, FB)
-
-

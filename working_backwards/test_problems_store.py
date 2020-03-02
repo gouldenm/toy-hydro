@@ -3,8 +3,8 @@ import numpy as np
 from dustywave_sol2 import *
 from dust_settling_sol import *
 from dusty_shock_adiabatic import *
-#from explicit_euler_solver import *
-from implicit_euler_solver_mid import *
+from explicit_euler_solver import *
+#from implicit_euler_solver_mid import *
 
 
 def _test_convergence(IC, pmin=4, pmax=10, figs_evol=None, fig_err=None, t_final=3.0, FB=1, 
@@ -17,8 +17,8 @@ def _test_convergence(IC, pmin=4, pmax=10, figs_evol=None, fig_err=None, t_final
     label=scheme.__name__
     for Ni in N:
         print (scheme.__name__, Ni)
-        _, W0 = solve_euler(Ni, IC, 0, Ca = 0.4, mesh_type = "Lagrangian",  fixed_v = 1.0, FB=FB, K=K)
-        x, W = solve_euler(Ni, IC, t_final, Ca = 0.4, mesh_type = "Lagrangian", fixed_v = 1.0, FB=FB, K=K)
+        _, W0 = solve_euler(Ni, IC, 0, Ca = 0.4, mesh_type = "fixed", FB=FB, K=K, GAMMA=GAMMA)
+        x, W = solve_euler(Ni, IC, t_final, Ca = 0.4, mesh_type = "fixed", FB=FB, K=K, GAMMA=GAMMA)
         true = IC(x, t=t_final)
         if figs_evol is not None:
             c = figs_evol[0].plot(x, W[:,0], c=c, 
@@ -61,7 +61,7 @@ def _test_convergence(IC, pmin=4, pmax=10, figs_evol=None, fig_err=None, t_final
                                   label="dust", linestyle = "--")
 
 
-def init_wave(xc, cs0=1.0, rho0=1.0, v0=1.0, drho=1e-6, t=0, dust_gas_ratio = 1.0, 
+def init_wave(xc, K, cs0=1.0, rho0=1.0, v0=1.0, drho=1e-6, t=0, dust_gas_ratio = 1.0, 
               GAMMA=5./3., FB=1, mach=0, gravity=0):
     if t == 0:
         kx = 2*np.pi*xc
@@ -77,7 +77,7 @@ def init_wave(xc, cs0=1.0, rho0=1.0, v0=1.0, drho=1e-6, t=0, dust_gas_ratio = 1.
         W[:,4] = W[:,1]
     
     else:
-        sol = DustyWaveSolver(K=0.1, delta=drho, feedback=FB)(t)
+        sol = DustyWaveSolver(K=K, delta=drho, feedback=FB)(t)
         
         x = xc - v0*t
         W = np.full([len(x), NHYDRO], np.nan)
@@ -91,7 +91,7 @@ def init_wave(xc, cs0=1.0, rho0=1.0, v0=1.0, drho=1e-6, t=0, dust_gas_ratio = 1.
     return W
 
 
-def init_sod(xc, dust_gas_ratio = 1.0, gravity=0.0, GAMMA=5./3., FB=1.0, mach=0):
+def init_sod(xc, K, dust_gas_ratio = 1.0, gravity=0.0, GAMMA=5./3., FB=1.0, mach=0):
     Pl = 1.0
     Pr = 0.1
     rhol = 1.0
@@ -151,7 +151,7 @@ def _test_sod(Nx=256, t_final=0.1, gravity=0.0, FB=1.0):
     subs[3].set_xlim(0, 0.5)
     subs[4].set_xlim(0, 0.5)"""
 
-def init_dustybox(xc, dust_gas_ratio = 1.0, gravity=0.0, GAMMA=5./3., FB=1.0, mach=0):
+def init_dustybox(xc, K, dust_gas_ratio = 1.0, gravity=0.0, GAMMA=5./3., FB=1.0, mach=0):
     W = np.full([len(xc), NHYDRO], np.nan)
     P = 1.0
     rho_g = 1.0
@@ -246,7 +246,7 @@ def _test_dustybox_convergence(pmin = 4, pmax=10, t_final=1.0, FB=1, K=0.01):
     plt.legend()
 
 
-def init_const_gravity(xc, dust_gas_ratio=1.0, gravity=-1.0, GAMMA=5./3., FB=0, mach=0):
+def init_const_gravity(xc, K, dust_gas_ratio=1.0, gravity=-1.0, GAMMA=5./3., FB=0, mach=0):
     W = np.full([len(xc), NHYDRO], np.nan)
     H = (gravity*GAMMA)
     P_0 = 1.0/GAMMA
@@ -307,7 +307,12 @@ def _test_const_gravity(t_final=1.0, Nx=256, gravity=-1.0, dust_gas_ratio=1.0, C
 
 
 
-def init_dusty_shock_Jtype(xc, dust_gas_ratio = 1.0, gravity=0.0, GAMMA=1.0001, FB=1.0, mach=1.1):
+def init_dusty_shock_Jtype(xc, K, dust_gas_ratio = 1.0, gravity=0.0, GAMMA=1.0001, FB=1.0, mach=1.1):
+    extent = xc[-1] - xc[0]
+    Nx = len(xc)
+    halfNx = int(Nx/2)
+    true = shock(mach, dust_gas_ratio, {'drag_type':'power_law', 'drag_const':1.0}, extent/2., halfNx, GAMMA, 1.0,
+                     t=0, FB=FB, Kin=K, offset=extent)
     M = mach
     
     P = 1.0
@@ -326,26 +331,35 @@ def init_dusty_shock_Jtype(xc, dust_gas_ratio = 1.0, gravity=0.0, GAMMA=1.0001, 
     
     dv = v_s - v_post
     
+    print(v_s, v_post, dv)
+    
     W = np.full([len(xc), NHYDRO], np.nan)
     W[:, 0] = rho
-    W[:, 1] = dv
+    W[:, 1] = v_s
     W[:, 2] = P
     W[:, 3] = rho_d
-    W[:, 4] = dv
+    W[:, 4] = v_s
+    
+    W[halfNx:, 0] = true["rhog"]
+    W[halfNx:, 1] = true["wg"]
+    W[halfNx:, 2] = true["P"]
+    W[halfNx:, 3] = true["rhod"]
+    W[halfNx:, 4] = true["wd"]
     return(W)
 
 
-def _test_dusty_shocks_mach(t_final=5.0, Nx=200, Ca=0.2, FB = 1.0, K=10., D = 1.0):
-    machs=  [0.96, 1.1, 2, 3, 5, 10, 20, 40]#, 5, 10, 20, 50]#, 5, 6, 7, 8, 10.]
+def _test_dusty_shocks_mach(t_final=5.0, Nx=200, Ca=0.2, FB = 1.0, K=1000., D = 1.0, GAMMA=7./5., extent=30):
+    machs=  [10]#, 20, 40]#, 5, 10, 20, 50]#, 5, 6, 7, 8, 10.]
     times = [3, 3, 2.]#,   5, 6, 8, 8, 10]
-    times = [ 14./m for m in machs ]
+    times = [ t_final*10./m for m in machs ]
     #times = [10 for _ in machs]
     for i in range(0, len(machs)):
         mach = machs[i]
+        print(mach)
         t_final = times[i]
         x, W = solve_euler(Nx, init_dusty_shock_Jtype, t_final, Ca=Ca,
-                           mesh_type = "Lagrangian", b_type = "inflowL_and_reflectR",
-                           dust_gas_ratio = D, GAMMA=7./5, xend=20.0, 
+                           mesh_type = "fixed", b_type = "flow",
+                           dust_gas_ratio = D, GAMMA=GAMMA, xend=extent, 
                            FB=FB, K=K, mach=mach)
         
         f, subs = plt.subplots(3, 1, sharex=True)
@@ -353,8 +367,8 @@ def _test_dusty_shocks_mach(t_final=5.0, Nx=200, Ca=0.2, FB = 1.0, K=10., D = 1.
         subs[0].plot(x, W[:,4], c="k", label="Dust")
         
         
-        true = shock(mach, D, {'drag_type':'power_law', 'drag_const':1.0}, 10., 1000., 7./5, 1.0,
-                     t=t_final, FB=FB, Kin=K, offset=19.8)
+        true = shock(mach, D, {'drag_type':'power_law', 'drag_const':1.0}, 10., 1000., GAMMA, 1.0,
+                     t=t_final, FB=FB, Kin=K, offset=extent/2)
         
         subs[0].plot(true["xi"], true["wd"], c="gray", ls="--", label="True Dust")
         subs[0].plot(true["xi"], true["wg"], c="pink", ls="--", label="True Gas" )
@@ -379,13 +393,13 @@ def _test_dusty_shocks_mach(t_final=5.0, Nx=200, Ca=0.2, FB = 1.0, K=10., D = 1.
 
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
-    
+    """
     _test_convergence(init_wave, 
                       figs_evol=plt.subplots(3, 1)[1],
                       fig_err=plt.subplots(1)[1],
                       t_final = 1.0,
-                      FB=1)
-    
+                      FB=1, GAMMA=1.5, K=1000.)
+    """
     #_test_sod(t_final=0.2, Nx=569)
     
     #_test_dustybox_time(Nx=256, t_final= 2.0)
@@ -395,8 +409,8 @@ if __name__ == "__main__":
     #_test_const_gravity()
     
     #_test_dusty_shocks(t_final=6)
-    
-    #_test_dusty_shocks_mach(t_final=t, D=0.5)
+    for t in [0.01, 0.1, 0.2, 0.3, 0.5, 1.0, 2.0, 5.0, 10.]:
+        _test_dusty_shocks_mach(t_final=t, D=0.5, K=3., Nx=500, FB=1, GAMMA=7./5, extent=40)
     plt.show()
 
 

@@ -38,8 +38,6 @@ def shock(mach, D_ratio, drag_params, shock_length, shock_step, GAMMA, P_0,
     C0 = (GAMMA-1)/(2*GAMMA)*v_s**2 + P_0/rhog0
     
     vg0 = (-B0 - np.sqrt(B0**2 - 4*A0*C0)) / (2*A0)
-    print(c_s, v_s)
-    print(vg0, v_g0)
     
     A = (1+FB*D_ratio)* (GAMMA+1) / (2*GAMMA)
     B = - ( v_s*(1+FB*D_ratio) + P_0 / (rhog0*v_s))
@@ -59,7 +57,6 @@ def shock(mach, D_ratio, drag_params, shock_length, shock_step, GAMMA, P_0,
     rhog0in = np.copy(rhog0)
     rhog0 = rhog0 * v_s / vg0
     
-    print(rhog0, (GAMMA+1)/(GAMMA-1))
     
     def derivs(z, y):
         vd = y[0]
@@ -105,11 +102,12 @@ def shock(mach, D_ratio, drag_params, shock_length, shock_step, GAMMA, P_0,
     ###
 
     ################## SOLVE THE ODES! ###################
-    try:         
+    try:
+        t_eval = arange(0, shock_length, shock_length/shock_step)
         if mach > 1.:
             result = solve_ivp(derivs, [0, shock_length], [v_s, rhog0, rhod0],
-                               t_eval = arange(0, shock_length, shock_length/shock_step),
-                               method='Radau', atol=1e-14)
+                               t_eval=t_eval,
+                               method='BDF', atol=1e-14)
             #result = solver.solve(arange(0.0,  shock_length, shock_length/shock_step), [1.])
         else:
             result = solve_ivp(derivs, [0, shock_length], [(v_s-1e-4), rhog0, rhod0],
@@ -119,7 +117,6 @@ def shock(mach, D_ratio, drag_params, shock_length, shock_step, GAMMA, P_0,
                 
         xi = result.t
         vd = result.y[0]
-
         
         #####################################################################
     except Exception as e:
@@ -127,6 +124,9 @@ def shock(mach, D_ratio, drag_params, shock_length, shock_step, GAMMA, P_0,
         raise Exception('Solver failed. Great error message!')
     
     vg = gas_velocity(vd, mach, D_ratio)
+    
+    #### for steady solution only:
+    v_post = 0
     
     dx = t*v_post
     scaled_x = xi + offset - dx
