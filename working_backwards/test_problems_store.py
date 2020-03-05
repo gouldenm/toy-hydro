@@ -4,7 +4,7 @@ from dustywave_sol2 import *
 from dust_settling_sol import *
 from dusty_shock_adiabatic import *
 #from explicit_euler_solver import *
-from exponential_euler_solver_mid import *
+from exponential_euler_solver_split import *
 NHYDRO=5
 
 

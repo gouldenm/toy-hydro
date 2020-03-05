@@ -264,23 +264,23 @@ def solve_euler(Npts, IC, boundary, tout, Ca = 0.5, fixed_v = 0.0, mesh_type = "
         xc = xc + vc*dt
         dx = (xc[2:] - xc[:-2])*0.5
         return(xc, dx)
-        
-    def apply_drag_forces_split(U, dt):
+    
+    
+    def apply_drag_forces_split(Q, dx, dt):
         """Operator split drag forces"""
-        rho_g, rho_d = U[:,0], U[:,3]
+        mg, md = Q[:,0], Q[:,3]
+
+        m = mg + FB*md
+        fac = np.expm1( -K * m * dt / dx[1:-1])
         
-        rho = rho_g + FB*rho_d
-        exp = np.expm1( -K*rho*dt)
-        print(exp)
-        pg, pd = U[:,1], U[:,4]
+        pg, pd = Q[:,1], Q[:,4]
         
-        v_com = (pg + FB*pd) / rho 
-        dp = (rho_g*pd - rho_d*pg) * exp / rho 
+        v_com = (pg + FB*pd) / m
+        delta_pd = (mg*pd - md*pg) * fac / m
+
+        Q[:,4] += delta_pd
+        Q[:,1] -= FB*delta_pd
         
-        U[:, 4] += dp
-        U[:, 1] -= FB*dp
-    
-    
     #########################################################################################
     # Set the initial conditions
     W = IC(xc[stencil:-stencil], K, dust_gas_ratio= dust_gas_ratio, 
@@ -305,10 +305,11 @@ def solve_euler(Npts, IC, boundary, tout, Ca = 0.5, fixed_v = 0.0, mesh_type = "
         dtmax = Ca * min(dx) / max_wave_speed(U, GAMMA, FB)
         dt = min(dtmax, tout-t)
         
-        # 0.5) Initial drag step
-        apply_drag_forces_split(U, dt/2.)
+        # Initial drag step
+        apply_drag_forces_split(Q, dx, dt/2.)
         
         #1. Apply Boundaries
+        U = Q/dx[1:-1].reshape(-1,1)
         Ub = boundary(U,shape)
         
         #2. Compute Primitive variables
@@ -364,24 +365,33 @@ def solve_euler(Npts, IC, boundary, tout, Ca = 0.5, fixed_v = 0.0, mesh_type = "
         F1 = dt*np.diff(flux_1, axis=0)
         
         # 10. Time average fluxes (both used dt, so just *0.5)
+        
         flux_av = - 0.5*(F1+F0)
         Qn = Q + flux_av*dt
+        Utemp = Qn/dx[1:-1].reshape(-1,1)
+        
+        #10. Compute the drag terms using 2nd order exponential Runge-Kutta method.
+        f_g0 = -np.diff(flux_0[:,1]) ; f_g1 = -np.diff(flux_1[:,1])
+        f_d0 = -np.diff(flux_0[:,4]) ; f_d1 = -np.diff(flux_1[:,4])
+
+        Q = Q - 0.5*dt*np.diff(flux_0 + flux_1, axis=0) 
+        
+        # Final drag step
+        apply_drag_forces_split(Q, dx, dt/2.)
         
         # Include const gravity term
         Q[:,4] += gravity*dt*Q[:,3]
         Q[:,1] += gravity*dt*Q[:,0]
         
-        #11. Update U
-        U = Q/dx[1:-1].reshape(-1,1)
-        
-        #   Final drag step:
-        apply_drag_forces_split(U, dt/2)
-        
         if plot_every_step:
+            #Update U
+            U = Q/dx[1:-1].reshape(-1,1)
             W = cons2prim(U, GAMMA, FB)
             for i in range(0,5):
                 subs[i].plot(xc[2:-2], W[:,i], label=str(t))
             plt.pause(0.5)
         t = min(tout, t+dt)
+    
+    U = Q/dx[1:-1].reshape(-1,1)
     xc = xc[stencil:-stencil]
     return xc, cons2prim(U, GAMMA, FB)
