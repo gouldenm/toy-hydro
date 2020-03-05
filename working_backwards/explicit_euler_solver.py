@@ -150,8 +150,7 @@ def HLLC_solve(WLin, WRin, vf, GAMMA, FB):
     Sm = (uL - csl)
     Sp = (uR + csr)
     
-    Sstar = ( pR - pL + rhoL*uL*(Sm-uL) - rhoR*uR*(Sp - uR) ) / \
-            (rhoL*(Sm-uL) - rhoR*(Sp-uR))
+    Sstar = ( pR - pL + rhoL*uL*(Sm-uL) - rhoR*uR*(Sp - uR) ) / (rhoL*(Sm-uL) - rhoR*(Sp-uR))
     
     #   Compute star fluxes using single mean pressure in the star region (Toro 10.42, 10.44, 10.26)
     pLR = 0.5 * ( pL + pR + rhoL*(Sm - uL)*(Sstar - uL) + rhoR*(Sp - uR)*(Sstar - uR) )
@@ -172,10 +171,10 @@ def HLLC_solve(WLin, WRin, vf, GAMMA, FB):
     # Left / Right states
     fHLL = np.zeros_like(fL)
     
-    # RB: Note that you set the cases with S == 0 twice
-    indexL =                                 0 <= Sm.flatten()
-    indexLstar = (Sm.flatten()    <= 0 ) * ( 0 <= Sstar.flatten())
-    indexRstar = (Sstar.flatten() <= 0 ) * ( 0 <= Sp.flatten())
+    # RB: Note that you set the cases with S == 0 twice #MG: Cheers, fixed it!
+    indexL =                                 0 < Sm.flatten()
+    indexLstar = (Sm.flatten()    <= 0 ) * ( 0 < Sstar.flatten())
+    indexRstar = (Sstar.flatten() <= 0 ) * ( 0 < Sp.flatten())
     indexR =         Sp.flatten() <= 0
     
     fHLL[indexL,:3] = fL[indexL,:3]
@@ -237,7 +236,7 @@ def solve_euler(Npts, IC, boundary, tout, Ca = 0.5, fixed_v = 0.0, mesh_type = "
     xc = np.linspace(-dx0*stencil + dx0*0.5, xend+ dx0*stencil - dx0*0.5, shape)
     dx = (xc[2:] - xc[:-2])*0.5
     
-    def time_diff_W(W, gradW, vf):# ###, FB):
+    def time_diff_W(W, gradW, vf):
         dWdt = np.zeros_like(W)
         
         rho_g = W[:, 0]
@@ -249,28 +248,24 @@ def solve_euler(Npts, IC, boundary, tout, Ca = 0.5, fixed_v = 0.0, mesh_type = "
         P = W[:, 2]
         grad_P = gradW[:, 2]
         
+        dWdt[:,0] = -v_g*grad_rho_g - rho_g*grad_v_g
+        dWdt[:,1] = -grad_P/rho_g - v_g*grad_v_g 
+        dWdt[:,2] = -GAMMA*P*grad_v_g - v_g * grad_P
         
+        # ### Dust
         rho_d = W[:, 3]
         grad_rho_d = gradW[:, 3]
         
         v_d = W[:, 4] - vf
         grad_v_d = gradW[:, 4]
         
-        dWdt[:,0] = v_g*grad_rho_g + rho_g*grad_v_g
-        dWdt[:,1] = grad_P/rho_g + v_g*grad_v_g 
-        dWdt[:,2] = GAMMA*P*grad_v_g + v_g * grad_P
-        dWdt[:,3] =  v_d*grad_rho_d + rho_d*grad_v_d
-        dWdt[:,4] = v_d*grad_v_d 
-        dWdt *= -1
+        dWdt[:,3] = - v_d*grad_rho_d - rho_d*grad_v_d
+        dWdt[:,4] = -v_d*grad_v_d 
         return(dWdt)
     
-    def update_mesh(xc, dt, W):
+    def update_mesh(xc, dt, vc):
     #  Modify x coordinate based on velocity of cell centre
-        if mesh_type == "Lagrangian":
-            Wb = boundary(W, shape)
-            xc = xc + Wb[:,1]*dt
-        else:
-            xc = xc + fixed_v*dt
+        xc = xc + vc*dt
         dx = (xc[2:] - xc[:-2])*0.5
         return(xc, dx)
     
@@ -329,7 +324,7 @@ def solve_euler(Npts, IC, boundary, tout, Ca = 0.5, fixed_v = 0.0, mesh_type = "
         
         # 7. Move the mesh
         dxold = np.copy(dx)
-        xc, dx = update_mesh(xc, dt, W)
+        xc, dx = update_mesh(xc, dt, vc)
         
         # 8. Predict edge states W at t+td, starting with centre
         #8a. compute time diff
