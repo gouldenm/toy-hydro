@@ -367,10 +367,12 @@ def solve_euler(Npts, IC, boundary, tout, Ca = 0.5, fixed_v = 0.0, mesh_type = "
         eps_g = Qn[:,0] / rho ; eps_d = Qn[:,3] / rho
         rho /= dx[1:-1]
 
-        df   = (eps_g*(f_d0+f_d1) - eps_d*(f_g0+f_g1)) / 2
+        df   = eps_g*f_d0 - eps_d*f_g0 
+        dfdt = (eps_g*(f_d1-f_d0) - eps_d*(f_g1-f_g0)) / dt
 
         dm = (eps_g*Q[:,4] - eps_d*Q[:,1]) * np.exp(-K*rho*dt) 
-        dm += df *-np.expm1(-dt*K*rho)/(K*rho)
+        dm += (df - dfdt/(K*rho)) *-np.expm1(-dt*K*rho)/(K*rho)
+        dm += dfdt*dt/(K*rho)
         
         m_d = eps_d * m_com + dm
         m_g = eps_g * m_com - dm*FB
