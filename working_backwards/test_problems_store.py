@@ -17,55 +17,59 @@ def boundary_periodic(Q, shape):
     Qb[-stencil:] = Qb[stencil:2*stencil]
     return(Qb)
 
-"""
-def boundary_reflecting(Q, shape):
-        elif b_type == "":
-            Qb = np.empty([shape, NHYDRO])
-            Qb[stencil:-stencil] = Q
-            Qb[0] = Qb[3]
-            Qb[1] = Qb[2]
-            Qb[-1] = Qb[-4]
-            Qb[-2] = Qb[-3]
-            
-            #flip signs for velocities
-            Qb[0,1] = - Qb[3,1]
-            Qb[1,1] = - Qb[2,1]
-            Qb[-1,1] = - Qb[-4,1]
-            Qb[-2,1] = - Qb[-3,1]
-            
-            if dust_reflect == True:
-                Qb[0,4] = - Qb[3,4]
-                Qb[1,4] = - Qb[2,4]
-                Qb[-1,4] = - Qb[-4,4]
-                Qb[-2,4] = - Qb[-3,4]
-            
-        
-        elif b_type == "flow":
-            Qb = np.empty([shape, NHYDRO])
-            Qb[stencil:-stencil] = Q
-            Qb[0] = Qb[2]
-            Qb[1] = Qb[2]
-            Qb[-2] = Qb[-3]
-            Qb[-1] = Qb[-3]
-            
-        elif b_type == "inflowL_and_reflectR":
-            Qb = np.empty([shape, NHYDRO])
-            Qb[stencil:-stencil] = Q
-            #   inflow both on left
-            Qb[0] = Qb[2]
-            Qb[1] = Qb[2]
-            
-            #   inflow dust on right
-            Qb[-2] = Qb[-3]
-            Qb[-1] = Qb[-3]
-            #   reflect gas on right
-            Qb[-1,:3] = Qb[-4,:3]
-            Qb[-2,:3] = Qb[-3,:3]
-            Qb[-1,1] = -Qb[-4,1]
-            Qb[-2,1] = -Qb[-3,1]
-        return Qb
-"""
 
+def boundary_reflecting(Q, shape):
+    stencil=2
+    Npts = shape - 2*stencil
+    Qb = np.empty([shape, NHYDRO])
+    Qb[stencil:-stencil] = Q
+    Qb[0] = Qb[3]
+    Qb[1] = Qb[2]
+    Qb[-1] = Qb[-4]
+    Qb[-2] = Qb[-3]
+    
+    #flip signs for velocities
+    Qb[0,1] = - Qb[3,1]
+    Qb[1,1] = - Qb[2,1]
+    Qb[-1,1] = - Qb[-4,1]
+    Qb[-2,1] = - Qb[-3,1]
+            
+    return(Qb)
+
+def boundary_flow(Q, shape):
+    stencil=2
+    Npts = shape - 2*stencil
+    Qb = np.empty([shape, NHYDRO])
+    Qb[stencil:-stencil] = Q
+    Qb[0] = Qb[2]
+    Qb[1] = Qb[2]
+    Qb[-2] = Qb[-3]
+    Qb[-1] = Qb[-3]
+    return(Qb)
+
+def boundary_inflowL_and_reflectR(Q, shape):
+    stencil=2
+    Npts = shape - 2*stencil
+    Qb = np.empty([shape, NHYDRO])
+    Qb[stencil:-stencil] = Q
+    #   inflow both on left
+    Qb[0] = Qb[2]
+    Qb[1] = Qb[2]
+    
+    #   inflow dust on right
+    Qb[-2] = Qb[-3]
+    Qb[-1] = Qb[-3]
+    #   reflect gas on right
+    Qb[-1,:3] = Qb[-4,:3]
+    Qb[-2,:3] = Qb[-3,:3]
+    Qb[-1,1] = -Qb[-4,1]
+    Qb[-2,1] = -Qb[-3,1]
+    return (Qb)
+
+
+
+
+## ### ### TEST PROBLEMS ### ###
 
 def _test_convergence(IC, pmin=4, pmax=9, figs_evol=None, fig_err=None, t_final=3.0, FB=1, 
                       GAMMA=5./3., K=0.1):
@@ -75,8 +79,10 @@ def _test_convergence(IC, pmin=4, pmax=9, figs_evol=None, fig_err=None, t_final=
     c=None
     for Ni in N:
         print (Ni)
-        _, W0 = solve_euler(Ni, IC, boundary_periodic, 0, Ca = 0.4, mesh_type = "fixed", FB=FB, K=K, GAMMA=GAMMA)
-        x, W = solve_euler(Ni, IC, boundary_periodic, t_final, Ca = 0.4, mesh_type = "fixed", FB=FB, K=K, GAMMA=GAMMA)
+        _, W0 = solve_euler(Ni, IC, boundary_periodic, 0, Ca = 0.4, mesh_type = "fixed", 
+                            FB=FB, K=K, GAMMA=GAMMA)
+        x, W = solve_euler(Ni, IC, boundary_periodic, t_final, Ca = 0.4, mesh_type = "fixed", 
+                           FB=FB, K=K, GAMMA=GAMMA)
         true = IC(x, K, t=t_final)
         if figs_evol is not None:
             c = figs_evol[0].plot(x, W[:,0], c=c, 
@@ -181,12 +187,12 @@ def _test_sod(Nx=256, t_final=0.1, gravity=0.0, FB=1.0):
     f, subs = plt.subplots(5, 1)
     plt.suptitle("Dustyshock test")
     
-    xL, WL = solve_euler(Nx, IC, t_final, Ca=0.4, 
-                         mesh_type = "Lagrangian", fixed_v = 0.0, b_type="flow", FB=FB)
-    xF, WF = solve_euler(Nx, IC, t_final, Ca=0.4, 
-                         mesh_type= "Fixed", fixed_v=0.0, b_type="flow", FB=FB)
-    xI, WI = solve_euler(Nx, IC, 0.0, Ca=0.4, 
-                         mesh_type = "Fixed", fixed_v=0.0, b_type="flow", FB=FB)
+    xL, WL = solve_euler(Nx, IC, boundary_flow, t_final, Ca=0.4, 
+                         mesh_type = "Lagrangian", fixed_v = 0.0, FB=FB)
+    xF, WF = solve_euler(Nx, IC, boundary_flow, t_final, Ca=0.4, 
+                         mesh_type= "Fixed", fixed_v=0.0, FB=FB)
+    xI, WI = solve_euler(Nx, IC, boundary_flow, 0.0, Ca=0.4, 
+                         mesh_type = "Fixed", fixed_v=0.0, FB=FB)
     
     for i in range(0,5):
         subs[i].plot(xL, WL[:,i], c="b", label="Lagrangian")
@@ -237,8 +243,8 @@ def _test_dustybox_time(Nx=256, t_final= 1.0, FB=1.0):
         vFs = []
         for t in np.linspace(0, t_final, 10):
             ts.append(t)
-            xL, WL = solve_euler(Nx, IC, t, Ca=0.4,
-                                 mesh_type = "Lagrangian", b_type = "periodic",
+            xL, WL = solve_euler(Nx, IC, boundary_periodic, t, Ca=0.4,
+                                 mesh_type = "Lagrangian",
                                  dust_gas_ratio = ratio, FB=FB)
             """xF, WF = solve_euler(Nx, IC, t, Ca=0.4,
                                  mesh_type = "fixed", b_type = "periodic",
@@ -286,8 +292,8 @@ def _test_dustybox_convergence(pmin = 4, pmax=10, t_final=1.0, FB=1, K=0.01):
         vLs = []
         vFs = []
         for Ni in N:
-            xL, WL = solve_euler(Ni, IC, t_final, Ca=0.4,
-                                 mesh_type = "fixed", b_type = "periodic",
+            xL, WL = solve_euler(Ni, IC, boundary_periodic, t_final, Ca=0.4,
+                                 mesh_type = "fixed",
                                  dust_gas_ratio = ratio, FB=1, K=K)
             vL = true - np.mean(WL[:,4])
             if vL == 0:
@@ -325,17 +331,19 @@ def init_const_gravity(xc, K, dust_gas_ratio=1.0, gravity=-1.0, GAMMA=5./3., FB=
     return(W)
 
 
-def _test_const_gravity(t_final=1.0, Nx=256, gravity=-1.0, dust_gas_ratio=1.0, Ca=0.4, GAMMA=5./3., FB=0):
+def _test_const_gravity(t_final=1.0, Nx=256, gravity=-1.0, dust_gas_ratio=1.0, Ca=0.4, 
+                        GAMMA=5./3., FB=0, K=10.0):
+    print(FB)
     IC = init_const_gravity
     f, subs = plt.subplots(5, 1)
     
-    xI, WI = solve_euler(Nx, IC, 0, Ca=Ca,
-                         mesh_type="fixed", b_type = "reflecting",
+    xI, WI = solve_euler(Nx, IC, boundary_reflecting, 0, Ca=Ca,
+                         mesh_type="fixed", K=K,
                          dust_gas_ratio= dust_gas_ratio, gravity = gravity, FB=0)
     
     for t in [2.0, 3.0, 5.0, 10.0]:
-        x, W = solve_euler(Nx, IC, t, Ca=Ca, 
-                           mesh_type = "fixed", b_type = "reflecting",
+        x, W = solve_euler(Nx, IC, boundary_reflecting, t, Ca=Ca, 
+                           mesh_type = "fixed", K=K,
                            dust_gas_ratio = dust_gas_ratio, gravity=gravity, FB=0)
         for i in range(0,5):
             subs[i].plot(x, W[:,i], label=str(t))
@@ -412,8 +420,8 @@ def _test_dusty_shocks_mach(t_final=5.0, Nx=200, Ca=0.2, FB = 1.0, K=1000., D = 
         mach = machs[i]
         print(mach)
         t_final = times[i]
-        x, W = solve_euler(Nx, init_dusty_shock_Jtype, t_final, Ca=Ca,
-                           mesh_type = "Lagrangian", b_type = "inflowL_and_reflectR",
+        x, W = solve_euler(Nx, init_dusty_shock_Jtype, boundary_inflowL_and_reflectR, t_final, Ca=Ca,
+                           mesh_type = "Lagrangian",
                            dust_gas_ratio = D, GAMMA=GAMMA, xend=extent, 
                            FB=FB, K=K, mach=mach)
         
@@ -448,13 +456,13 @@ def _test_dusty_shocks_mach(t_final=5.0, Nx=200, Ca=0.2, FB = 1.0, K=1000., D = 
 
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
-    
+    """
     _test_convergence(init_wave, 
                       figs_evol=plt.subplots(3, 1)[1],
                       fig_err=plt.subplots(1)[1],
                       t_final = 1.0,
                       FB=1, GAMMA=1.5, K=1.)
-    
+    """
     #_test_sod(t_final=0.2, Nx=569)
     
     #_test_dustybox_time(Nx=256, t_final= 2.0)
@@ -463,9 +471,8 @@ if __name__ == "__main__":
     
     #_test_const_gravity()
     
-    #_test_dusty_shocks(t_final=6)
-    #for t in [2.5]:
-    #    _test_dusty_shocks_mach(t_final=t, D=0.5, K=3., Nx=500, FB=1, GAMMA=7./5, extent=40)
+    for t in [2.5]:
+        _test_dusty_shocks_mach(t_final=t, D=0.5, K=3., Nx=500, FB=1, GAMMA=7./5, extent=40)
     plt.show()
 
 
