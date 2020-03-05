@@ -5,6 +5,66 @@ from dust_settling_sol import *
 from dusty_shock_adiabatic import *
 from explicit_euler_solver import *
 #from implicit_euler_solver_mid import *
+NHYDRO=5
+
+
+def boundary_periodic(Q, shape):
+    stencil=2
+    Npts = shape - 2*stencil
+    Qb = np.empty([shape, NHYDRO])
+    Qb[stencil:-stencil] = Q
+    Qb[ :stencil] = Qb[Npts:Npts+stencil]
+    Qb[-stencil:] = Qb[stencil:2*stencil]
+    return(Qb)
+
+"""
+def boundary_reflecting(Q, shape):
+        elif b_type == "":
+            Qb = np.empty([shape, NHYDRO])
+            Qb[stencil:-stencil] = Q
+            Qb[0] = Qb[3]
+            Qb[1] = Qb[2]
+            Qb[-1] = Qb[-4]
+            Qb[-2] = Qb[-3]
+            
+            #flip signs for velocities
+            Qb[0,1] = - Qb[3,1]
+            Qb[1,1] = - Qb[2,1]
+            Qb[-1,1] = - Qb[-4,1]
+            Qb[-2,1] = - Qb[-3,1]
+            
+            if dust_reflect == True:
+                Qb[0,4] = - Qb[3,4]
+                Qb[1,4] = - Qb[2,4]
+                Qb[-1,4] = - Qb[-4,4]
+                Qb[-2,4] = - Qb[-3,4]
+            
+        
+        elif b_type == "flow":
+            Qb = np.empty([shape, NHYDRO])
+            Qb[stencil:-stencil] = Q
+            Qb[0] = Qb[2]
+            Qb[1] = Qb[2]
+            Qb[-2] = Qb[-3]
+            Qb[-1] = Qb[-3]
+            
+        elif b_type == "inflowL_and_reflectR":
+            Qb = np.empty([shape, NHYDRO])
+            Qb[stencil:-stencil] = Q
+            #   inflow both on left
+            Qb[0] = Qb[2]
+            Qb[1] = Qb[2]
+            
+            #   inflow dust on right
+            Qb[-2] = Qb[-3]
+            Qb[-1] = Qb[-3]
+            #   reflect gas on right
+            Qb[-1,:3] = Qb[-4,:3]
+            Qb[-2,:3] = Qb[-3,:3]
+            Qb[-1,1] = -Qb[-4,1]
+            Qb[-2,1] = -Qb[-3,1]
+        return Qb
+"""
 
 
 def _test_convergence(IC, pmin=4, pmax=9, figs_evol=None, fig_err=None, t_final=3.0, FB=1, 
@@ -15,8 +75,8 @@ def _test_convergence(IC, pmin=4, pmax=9, figs_evol=None, fig_err=None, t_final=
     c=None
     for Ni in N:
         print (Ni)
-        _, W0 = solve_euler(Ni, IC, 0, Ca = 0.4, mesh_type = "fixed", FB=FB, K=K, GAMMA=GAMMA)
-        x, W = solve_euler(Ni, IC, t_final, Ca = 0.4, mesh_type = "fixed", FB=FB, K=K, GAMMA=GAMMA)
+        _, W0 = solve_euler(Ni, IC, boundary_periodic, 0, Ca = 0.4, mesh_type = "fixed", FB=FB, K=K, GAMMA=GAMMA)
+        x, W = solve_euler(Ni, IC, boundary_periodic, t_final, Ca = 0.4, mesh_type = "fixed", FB=FB, K=K, GAMMA=GAMMA)
         true = IC(x, K, t=t_final)
         if figs_evol is not None:
             c = figs_evol[0].plot(x, W[:,0], c=c, 

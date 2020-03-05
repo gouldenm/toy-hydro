@@ -215,7 +215,7 @@ def max_wave_speed(U, GAMMA, FB):
 
 
 
-def solve_euler(Npts, IC, tout, Ca = 0.5, fixed_v = 0.0, mesh_type = "fixed", 
+def solve_euler(Npts, IC, boundary, tout, Ca = 0.5, fixed_v = 0.0, mesh_type = "fixed", 
                 dust_scheme = "explicit", b_type = "periodic", 
                 dust_gas_ratio = 1.0,
                 gravity = 0.0,
@@ -229,76 +229,15 @@ def solve_euler(Npts, IC, tout, Ca = 0.5, fixed_v = 0.0, mesh_type = "fixed",
         HLL_solver = HLLC_solve
     else:
         HLL_solver = HLL_solve
-    
     """Test schemes using an Explicit TVD RK integration"""
-    # Setup up the grid
     stencil = 2
-    order = 2
-    
     shape = Npts + 2*stencil
+    
     dx0 = xend / Npts
     xc = np.linspace(-dx0*stencil + dx0*0.5, xend+ dx0*stencil - dx0*0.5, shape)
     dx = (xc[2:] - xc[:-2])*0.5
     
-    # Reconstruction function:
-    
-    
-    def boundary(Q):
-        if b_type == "periodic":
-            Qb = np.empty([shape, NHYDRO])
-            Qb[stencil:-stencil] = Q
-            Qb[ :stencil] = Qb[Npts:Npts+stencil]
-            Qb[-stencil:] = Qb[stencil:2*stencil]
-        
-        elif b_type == "reflecting":
-            Qb = np.empty([shape, NHYDRO])
-            Qb[stencil:-stencil] = Q
-            Qb[0] = Qb[3]
-            Qb[1] = Qb[2]
-            Qb[-1] = Qb[-4]
-            Qb[-2] = Qb[-3]
-            
-            #flip signs for velocities
-            Qb[0,1] = - Qb[3,1]
-            Qb[1,1] = - Qb[2,1]
-            Qb[-1,1] = - Qb[-4,1]
-            Qb[-2,1] = - Qb[-3,1]
-            
-            if dust_reflect == True:
-                Qb[0,4] = - Qb[3,4]
-                Qb[1,4] = - Qb[2,4]
-                Qb[-1,4] = - Qb[-4,4]
-                Qb[-2,4] = - Qb[-3,4]
-            
-        
-        elif b_type == "flow":
-            Qb = np.empty([shape, NHYDRO])
-            Qb[stencil:-stencil] = Q
-            Qb[0] = Qb[2]
-            Qb[1] = Qb[2]
-            Qb[-2] = Qb[-3]
-            Qb[-1] = Qb[-3]
-            
-        elif b_type == "inflowL_and_reflectR":
-            Qb = np.empty([shape, NHYDRO])
-            Qb[stencil:-stencil] = Q
-            #   inflow both on left
-            Qb[0] = Qb[2]
-            Qb[1] = Qb[2]
-            
-            #   inflow dust on right
-            Qb[-2] = Qb[-3]
-            Qb[-1] = Qb[-3]
-            #   reflect gas on right
-            Qb[-1,:3] = Qb[-4,:3]
-            Qb[-2,:3] = Qb[-3,:3]
-            Qb[-1,1] = -Qb[-4,1]
-            Qb[-2,1] = -Qb[-3,1]
-        return Qb
-
-    
     def time_diff_W(W, gradW, vf):# ###, FB):
-
         dWdt = np.zeros_like(W)
         
         rho_g = W[:, 0]
@@ -328,7 +267,7 @@ def solve_euler(Npts, IC, tout, Ca = 0.5, fixed_v = 0.0, mesh_type = "fixed",
     def update_mesh(xc, dt, W):
     #  Modify x coordinate based on velocity of cell centre
         if mesh_type == "Lagrangian":
-            Wb = boundary(W)
+            Wb = boundary(W, shape)
             xc = xc + Wb[:,1]*dt
         else:
             xc = xc + fixed_v*dt
@@ -361,7 +300,7 @@ def solve_euler(Npts, IC, tout, Ca = 0.5, fixed_v = 0.0, mesh_type = "fixed",
         dt = min(dtmax, tout-t)
         
         #1. Apply Boundaries
-        Ub = boundary(U)
+        Ub = boundary(U,shape)
         
         #2. Compute Primitive variables
         W = cons2prim(U, GAMMA, FB)
@@ -394,12 +333,12 @@ def solve_euler(Npts, IC, tout, Ca = 0.5, fixed_v = 0.0, mesh_type = "fixed",
         
         # 8. Predict edge states W at t+td, starting with centre
         #8a. compute time diff
-        Wb = boundary(W)[1:-1]#match gradient extent
+        Wb = boundary(W,shape)[1:-1]#match gradient extent
         WL = np.copy(Wb[:-1]); WR = np.copy(Wb[1:])
         dWdt = time_diff_W(Wb, gradW, vc[1:-1])
         
         #8b. predict cell centre, INCLUDING DRAG
-        Ws = boundary(W)[1:-1]
+        Ws = boundary(W,shape)[1:-1]
         rho_d = Ws[:, 3]
         rho_g = Ws[:, 0]
         Ws[:,1] += FB*K*rho_d*(Ws[:, 4] - Ws[:, 1])*dt
@@ -462,93 +401,3 @@ def solve_euler(Npts, IC, tout, Ca = 0.5, fixed_v = 0.0, mesh_type = "fixed",
         t = min(tout, t+dt)
     xc = xc[stencil:-stencil]
     return xc, cons2prim(U, GAMMA, FB)
-
-
-
-
-
-###########################################################################################################
-###########################################################################################################
-###########################################################################################################
-
-
-
-def init_dusty_shock_Jtype(xc, K, dust_gas_ratio = 1.0, gravity=0.0, GAMMA=1.0001, FB=1.0, mach=1.1):
-    extent = xc[-1] - xc[0]
-    Nx = len(xc)
-    halfNx = int(Nx/2)
-    true = shock(mach, dust_gas_ratio, {'drag_type':'power_law', 'drag_const':1.0}, extent/2., halfNx, GAMMA, 1.0,
-                     t=0, FB=FB, Kin=K, offset=extent)
-    M = mach
-    
-    P = 1.0
-    rho = 1.0
-    rho_d = dust_gas_ratio*rho
-    
-    c_s = np.sqrt(GAMMA*P/rho)
-    v_s = c_s*M
-    
-    A = (1+FB*dust_gas_ratio)* (GAMMA+1) / (2*GAMMA)
-    B = - ( v_s*(1+FB*dust_gas_ratio) + P / (rho*v_s))
-    C = (GAMMA-1)/(2*GAMMA) *(v_s**2 * (1+FB*dust_gas_ratio) ) + P/rho
-    
-    v_post = (-B - np.sqrt(B**2 - 4*A*C)) / (2*A)
-    
-    
-    dv = v_s - v_post
-    
-    W = np.full([len(xc), NHYDRO], np.nan)
-    W[:, 0] = rho
-    W[:, 1] = dv
-    W[:, 2] = P
-    W[:, 3] = rho_d
-    W[:, 4] = dv
-    return(W)
-
-
-def _test_dusty_shocks_mach(t_final=5.0, Nx=200, Ca=0.2, FB = 1.0, K=1000., D = 1.0, GAMMA=7./5., extent=30):
-    machs=  [10]#, 20, 40]#, 5, 10, 20, 50]#, 5, 6, 7, 8, 10.]
-    times = [ t_final*10./m for m in machs ]
-    
-    for i in range(0, len(machs)):
-        mach = machs[i]
-        t_final = times[i]
-        
-        x, W = solve_euler(Nx, init_dusty_shock_Jtype, t_final, Ca=Ca,
-                           mesh_type = "Lagrangian", b_type = "inflowL_and_reflectR",
-                           dust_gas_ratio = D, GAMMA=GAMMA, xend=extent, 
-                           FB=FB, K=K, mach=mach)
-        
-        f, subs = plt.subplots(3, 1, sharex=True)
-        subs[0].plot(x, W[:,1], c="r", label="Gas")
-        subs[0].plot(x, W[:,4], c="k", label="Dust")
-        
-        
-        true = shock(mach, D, {'drag_type':'power_law', 'drag_const':1.0}, 10., 1000., GAMMA, 1.0,
-                     t=t_final, FB=FB, Kin=K, offset=extent - 0.04)
-        
-        subs[0].plot(true["xi"], true["wd"], c="gray", ls="--", label="True Dust")
-        subs[0].plot(true["xi"], true["wg"], c="pink", ls="--", label="True Gas" )
-        
-        subs[0].set_ylabel("v")
-        subs[0].legend(loc="best")
-        f.suptitle("J-type shock, t=" + str(t_final) + ", M=" + str(mach))
-       
-        subs[1].scatter(x, W[:,0], c="r", label="Gas")
-        subs[1].scatter(x, W[:,3], c="k", label="Dust")
-       
-        subs[1].plot(true["xi"], true["rhog"], c="pink", ls="--", label="True Gas")
-        subs[1].plot(true["xi"], true["rhod"], c="gray", ls="--", label="True Dust")
-        subs[1].set_ylabel("rho")
-        
-        subs[2].plot(true['xi'], true['P'], c="pink", ls="--", label="True Pressure")
-        subs[2].plot(x, W[:,2], c="red", label="Pressure")
-        subs[2].set_ylabel("P")
-        subs[2].set_xlabel("pos")
-        #plt.legend(loc="best")
-
-
-if __name__ == "__main__":
-    for t in [2.5]:
-        _test_dusty_shocks_mach(t_final=t, D=0.5, K=3., Nx=200, FB=1, GAMMA=7./5, extent=40)
-    plt.show()
