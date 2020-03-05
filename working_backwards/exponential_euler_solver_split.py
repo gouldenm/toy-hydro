@@ -288,16 +288,6 @@ def solve_euler(Npts, IC, boundary, tout, Ca = 0.5, fixed_v = 0.0, mesh_type = "
     U = prim2cons(W, GAMMA, FB)
     Q = U * dx[1:-1].reshape(-1,1)
     t = 0
-    if plot_every_step:
-        f, subs = plt.subplots(5, 1, sharex=True)
-        subs[0].set_ylim(-1, 25)
-        subs[0].set_ylabel('Density')
-        subs[1].set_ylim(-1,5)
-        subs[1].set_ylabel('Velocity')
-        subs[2].set_ylabel('Energy')
-        subs[3].set_ylim(0, 1.5)
-        subs[3].set_ylabel('Dust Density')
-        subs[4].set_ylabel('Dust velocity')
     
     while t < tout:
         print(t)
@@ -382,14 +372,6 @@ def solve_euler(Npts, IC, boundary, tout, Ca = 0.5, fixed_v = 0.0, mesh_type = "
         # Include const gravity term
         Q[:,4] += gravity*dt*Q[:,3]
         Q[:,1] += gravity*dt*Q[:,0]
-        
-        if plot_every_step:
-            #Update U
-            U = Q/dx[1:-1].reshape(-1,1)
-            W = cons2prim(U, GAMMA, FB)
-            for i in range(0,5):
-                subs[i].plot(xc[2:-2], W[:,i], label=str(t))
-            plt.pause(0.5)
         t = min(tout, t+dt)
     
     U = Q/dx[1:-1].reshape(-1,1)

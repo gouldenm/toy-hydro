@@ -14,7 +14,7 @@ i_pre_g = 2
 i_rho_d = 3
 i_vel_d = 4
 
-K = 1000.0
+K = 10000.0
 
 
 FB = 1.0
@@ -547,7 +547,7 @@ if __name__ == "__main__":
                       figs_evol=plt.subplots(5, 1)[1],
                       fig_err=plt.subplots(1)[1])
 
-    _run_and_plot_sod()
+    #_run_and_plot_sod()
 
     plt.show()
     

@@ -14,7 +14,7 @@ i_pre_g = 2
 i_rho_d = 3
 i_vel_d = 4
 
-K = 1.0
+K = 10.0
 
 FB = 1
 
@@ -336,7 +336,7 @@ def solve_euler(Npts, IC, tout, Ca = 0.7, lagrangian=False, HLLC=True):
 
     return xc, xe, cons2prim(Q/dx)
                 
-def _test_convergence(IC, pmin=3, pmax=10, t_final=3.0,
+def _test_convergence(IC, pmin=3, pmax=9, t_final=3.0,
                       figs_evol=None, fig_err=None):
 
     N = 2**np.arange(pmin, pmax+1)
@@ -537,7 +537,7 @@ if __name__ == "__main__":
                       figs_evol=plt.subplots(5, 1)[1],
                       fig_err=plt.subplots(1)[1])
 
-    _run_and_plot_sod()
+    #_run_and_plot_sod()
 
     plt.show()
     
