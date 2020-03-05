@@ -329,12 +329,16 @@ def solve_euler(Npts, IC, boundary, tout, Ca = 0.5, fixed_v = 0.0, mesh_type = "
         dWdt = time_diff_W(Wb, gradW, vc[1:-1])
         
         #8b. predict cell centre, INCLUDING DRAG
-        Ws = boundary(W,shape)[1:-1]
-        rho_d = Ws[:, 3]
-        rho_g = Ws[:, 0]
-        Ws[:,1] += FB*K*rho_d*(Ws[:, 4] - Ws[:, 1])*dt
-        Ws[:,4] -=    K*rho_g*(Ws[:, 4] - Ws[:, 1])*dt       #dust
-        Ws += dWdt*dt
+        Ws = boundary(W, shape)[1:-1] + dt*dWdt
+        
+        rho = Ws[:,0] + FB*Ws[:,3]
+    
+        v_com = (Ws[:,0]*Ws[:,1] + FB*Ws[:,3]*Ws[:,4])/rho
+        dV = (Wb[:,4] - Wb[:,1]) * np.exp(-K*rho*dt) 
+        da = (dWdt[:,4] - dWdt[:,1]) *-np.expm1(-dt*K*rho)/(K*rho)
+
+        Ws[:,1] = v_com - FB*Ws[:,3]*(dV + da)/rho
+        Ws[:,4] = v_com +    Ws[:,0]*(dV + da)/rho
         
         #8c. Include constant gravity term, if applicable
         Ws[:,1] += gravity*dt #either 0.0 or 1.0
@@ -351,31 +355,38 @@ def solve_euler(Npts, IC, boundary, tout, Ca = 0.5, fixed_v = 0.0, mesh_type = "
         F1 = dt*np.diff(flux_1, axis=0)
         
         # 10. Time average fluxes (both used dt, so just *0.5)
-        Qold = np.copy(Q)
         
-        flux = - 0.5*(F1+F0)
-        Q = Qold + flux
+        flux_av = - 0.5*(F1+F0)
+        Qn = Q + flux_av*dt
+        Utemp = Qn/dx[1:-1].reshape(-1,1)
         
-        Utemp = Q/dx[1:-1].reshape(-1,1)
+        #10. Compute the drag terms using 2nd order exponential Runge-Kutta method.
+        f_g0 = -np.diff(flux_0[:,1]) ; f_g1 = -np.diff(flux_1[:,1])
+        f_d0 = -np.diff(flux_0[:,4]) ; f_d1 = -np.diff(flux_1[:,4])
+
+        Qn = Q - 0.5*dt*np.diff(flux_0 + flux_1, axis=0) 
+
+        m_com = Qn[:,1] + FB*Qn[:,4]
         
-        #10a. Recompute Q for gas / dust momenta...
-        p_g = Qold[:,1].copy()
-        p_d = Qold[:,4].copy()
-        f_g = flux[:,1].copy()
-        f_d = flux[:,4].copy()
-        rho_d = Utemp[:,0].copy()
-        rho_g = Utemp[:,3].copy()
-        rho = FB*rho_d + rho_g
-        eps_g = rho_g / rho 
-        eps_d = rho_d / rho 
+        rho = Qn[:,0] + FB*Qn[:,3]
+        eps_g = Qn[:,0] / rho ; eps_d = Qn[:,3] / rho
+        rho /= dx[1:-1]
+
+        df   = eps_g*f_d0 - eps_d*f_g0 
+        dfdt = (eps_g*(f_d1-f_d0) - eps_d*(f_g1-f_g0)) / dt
+
+        dm = (eps_g*Q[:,4] - eps_d*Q[:,1]) * np.exp(-K*rho*dt) 
+        dm += (df - dfdt/(K*rho)) *-np.expm1(-dt*K*rho)/(K*rho)
+        dm += dfdt*dt/(K*rho)
         
-        dp_0 = K*dt*(Qold[:,0]*Qold[:,4] - Qold[:,3]*Qold[:,1])/dxold[1:-1].reshape(-1)
-        dp_1 = K*dt*(Q[:,0]*Q[:,4] - Q[:,3]*Q[:,1])/dx[1:-1].reshape(-1)
-        
-        dp = 0.5*(dp_0 + dp_1)
-        
-        Q[:,4] -= dp
-        Q[:,1] += FB*dp
+        m_d = eps_d * m_com + dm
+        m_g = eps_g * m_com - dm*FB
+
+        #11. Update Conserved quantities
+        Q[:] = Qn
+
+        Q[:,1] = m_g
+        Q[:,4] = m_d
         
         # Include const gravity term
         Q[:,4] += gravity*dt*Q[:,3]

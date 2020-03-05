@@ -3,8 +3,8 @@ import numpy as np
 from dustywave_sol2 import *
 from dust_settling_sol import *
 from dusty_shock_adiabatic import *
-from explicit_euler_solver import *
-#from implicit_euler_solver_mid import *
+#from explicit_euler_solver import *
+from exponential_euler_solver_mid import *
 NHYDRO=5
 
 
@@ -107,6 +107,7 @@ def _test_convergence(IC, pmin=4, pmax=9, figs_evol=None, fig_err=None, t_final=
     if fig_err is not None:
         fig_err.loglog(N, errs_gas, c=c, label=" gas", ls = "-")
         fig_err.loglog(N, errs_dust, c=c, label=" dust", ls="--")
+        plt.title("K=" + str(K))
 
     if fig_err is not None:
         fig_err.set_xlabel('N')
@@ -457,11 +458,9 @@ def _test_dusty_shocks_mach(t_final=5.0, Nx=200, Ca=0.2, FB = 1.0, K=1000., D = 
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
     
-    _test_convergence(init_wave, 
-                      figs_evol=plt.subplots(3, 1)[1],
-                      fig_err=plt.subplots(1)[1],
-                      t_final = 1.0,
-                      FB=1, GAMMA=1.5, K=1.)
+    #for K in [0.1, 1.0, 10.0, 100.0]:
+    #    _test_convergence(init_wave, figs_evol=plt.subplots(3, 1)[1], fig_err=plt.subplots(1)[1],
+    #                      t_final = 1.0, FB=1, GAMMA=1.5, K=K)
     
     #_test_sod(t_final=0.2, Nx=569)
     
@@ -471,8 +470,8 @@ if __name__ == "__main__":
     
     #_test_const_gravity()
     
-    #for t in [2.5]:
-    #    _test_dusty_shocks_mach(t_final=t, D=0.5, K=3., Nx=500, FB=1, GAMMA=7./5, extent=40)
+    for t in [2.5]:
+        _test_dusty_shocks_mach(t_final=t, D=0.5, K=3., Nx=500, FB=1, GAMMA=7./5, extent=40)
     plt.show()
 
 
