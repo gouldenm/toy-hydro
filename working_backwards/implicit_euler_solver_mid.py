@@ -1,63 +1,48 @@
 from __future__ import print_function
 import numpy as np
-from dustywave_sol2 import *
-from dust_settling_sol import *
 from dusty_shock_adiabatic import *
+import matplotlib.pyplot as plt
 
 NHYDRO = 5
-HLLC = False
+HLLC = True
 plot_every_step = None#True
 
-class Arepo2(object):
-    """Second-order reconstruction as in AREPO."""
-    STENCIL = 2
-    ORDER = 2
-    def __init__(self, xc, m):
-        if m != 0:
-            raise ValueError("Arepo2 assumes m = 0")
+def reconstruct(Q, xc):
+    dx = xc[2:] - xc[:-2]
+    xe = 0.5*(xc[1:] + xc[:-1])
+    """Reconstruct the left/right states"""
+    Qm = Q[:-2]
+    Q0 = Q[1:-1]
+    Qp = Q[2:]
+    limit = 2.0
+    Qmax = np.maximum(np.maximum(Qp, Qm), Q0)
+    Qmin = np.minimum(np.minimum(Qp, Qm), Q0)
+    
+    #Not the least squares estimate, but what is used in AREPO code release
+    grad = (Qp - Qm) / dx.reshape(-1,1)
+    dQ = limit*grad*(xe[1:] - xc[1:-1]).reshape(-1,1)
+    Qp = Q0 + dQ
 
-        self._xc = xc
-        #### self._xc = xc = compute_centroids(xe, m)
-        self._dx = xc[2:] - xc[:-2]
-        self._xe = 0.5*(xc[1:] + xc[:-1])
-
-    def reconstruct(self, Q, xc):
-        dx = xc[2:] - xc[:-2]
-        xe = 0.5*(xc[1:] + xc[:-1])
-        """Reconstruct the left/right states"""
-        Qm = Q[:-2]
-        Q0 = Q[1:-1]
-        Qp = Q[2:]
-        limit = 1.0
-        Qmax = np.maximum(np.maximum(Qp, Qm), Q0)
-        Qmin = np.minimum(np.minimum(Qp, Qm), Q0)
+    pos = Qp > Qmax ; neg = Qp < Qmin
+    phir = np.where(pos, (Qmax - Q0)/dQ, np.where(neg, (Qmin - Q0)/dQ, 1))
         
-        #Not the least squares estimate, but what is used in AREPO code release
-        grad = (Qp - Qm) / dx.reshape(-1,1)
+    dQ = limit*grad*(xe[0:-1] - xc[1:-1]).reshape(-1,1)
+    Qm = Q0 + dQ
 
-        dQ = limit*grad*(xe[1:] - xc[1:-1]).reshape(-1,1)
-        Qp = Q0 + dQ
+    pos = Qm > Qmax ; neg = Qm < Qmin
+    phil = np.where(pos, (Qmax - Q0)/dQ, np.where(neg, (Qmin - Q0)/dQ, 1))
 
-        pos = Qp > Qmax ; neg = Qp < Qmin
-        phir = np.where(pos, (Qmax - Q0)/dQ, np.where(neg, (Qmin - Q0)/dQ, 1))
-        
-        dQ = limit*grad*(xe[0:-1] - xc[1:-1]).reshape(-1,1)
-        Qm = Q0 + dQ
-
-        pos = Qm > Qmax ; neg = Qm < Qmin
-        phil = np.where(pos, (Qmax - Q0)/dQ, np.where(neg, (Qmin - Q0)/dQ, 1))
-
-        alpha = np.maximum(0, np.minimum(1, np.minimum(phir, phil)))
-        grad *= alpha
-        
-        return grad
+    alpha = np.maximum(0, np.minimum(1, np.minimum(phir, phil)))
+    grad *= alpha
+    
+    return grad
 
 
 def prim2cons(W, GAMMA, FB):
     U = np.full((len(W), NHYDRO), np.nan) #conserved state vector
     U[:,0] = W[:,0] #gas density
     U[:,1] = W[:,0]*W[:,1] #gas momentum
-    U[:,2] = W[:,2]/(GAMMA-1) + (W[:,0]*W[:,1]**2)/2.   # + FB*(W[:,3]*W[:,4]**2)/2.   #gas energy + dust KE
+    U[:,2] = W[:,2]/(GAMMA-1) + (W[:,0]*W[:,1]**2)/2.    + FB*(W[:,3]*W[:,4]**2)/2.   #gas energy + dust KE
     U[:,3] = W[:,3]                                        #dust density
     U[:,4] = W[:,3]*W[:,4]                             #dust momentum
     return(U)
@@ -66,7 +51,7 @@ def cons2prim(U, GAMMA, FB):
     W = np.full((len(U), NHYDRO), np.nan) #primitive state vector
     W[:,0] = U[:,0] #gas density
     W[:,1] = U[:,1]/U[:,0] #gas velocity
-    W[:,2] = (GAMMA-1)*(U[:,2] - (U[:,1]**2/U[:,0])/2.)#   - FB*(U[:,4]**2/U[:,3])/2. )  #gas pressure
+    W[:,2] = (GAMMA-1)*(U[:,2] - (U[:,1]**2/U[:,0])/2.   - FB*(U[:,4]**2/U[:,3])/2. )  #gas pressure
     W[:,3] = U[:,3]                                     #dust density
     W[:,4] = U[:,4]/U[:,3]                             #dust velocity
     return(W)
@@ -76,7 +61,7 @@ def prim2flux(W, GAMMA, FB):
     F[:,0] = W[:,0]*W[:,1] #mass flux
     F[:,1] = W[:,0]*W[:,1]**2 + W[:,2] #momentum flux
     F[:,2] = W[:,1] * (W[:,2]/(GAMMA-1) + (W[:,0]*W[:,1]**2)/2 + W[:,2]) #\
-            # +  FB* W[:,4] * (W[:,3]*W[:,4]**2)/2.                 #gas energy flux + dust energy flux
+             #+  FB* W[:,4] * (W[:,3]*W[:,4]**2)/2.                 #gas energy flux + dust energy flux
     F[:,3] = W[:,3]*W[:,4]                                                  #dust mass flux
     F[:,4] = W[:,3]*W[:,4]**2                                              #dust momentum flux
     return(F)
@@ -117,22 +102,21 @@ def HLL_solve(WLin, WRin, vf, GAMMA, FB):
     ld = (np.sqrt(WL[:,3])*WL[:,4] + np.sqrt(WR[:,3])*WR[:,4]) / (np.sqrt(WL[:,3]) + np.sqrt(WR[:,3]))
     
     #   Calculate DUST flux in frame of face (note if vL < 0 < vR, then fHLL = 0.)
-    indexL = (ld > 1e-15) & np.logical_not(((WL[:,4] < 0) & (WR[:,4] > 0)))
-    indexC = (np.abs(ld) < 1e-15 ) & np.logical_not(((WL[:,4] < 0) & (WR[:,4] > 0)))
-    indexR = (ld < -1e-15) & np.logical_not(((WL[:,4] < 0) & (WR[:,4] > 0)))
-    fHLL[indexL,3:] = fL[indexL,3:]
-    fHLL[indexC,3:] = (fL[indexC,3:] + fR[indexC,3:])/2.
-    fHLL[indexR,3:] = fR[indexR,3:]
-    
     w_f = ld.reshape(-1,1)
     f_dust = w_f*np.where(w_f > 0, UL[:,3:], UR[:,3:]) 
-    
     fHLL[:, 3:] = f_dust
+    
+    #   ### Compute change in energy due to dust KE flux... ###
+    F_dust_energy_L = FB* (WL[:,3]*WL[:,4]**2)/2.
+    F_dust_energy_R = FB* (WR[:,3]*WR[:,4]**2)/2.
+    F_dust_energy = ld*np.where(ld >0, F_dust_energy_L, F_dust_energy_R)
+    
+    fHLL[:,2] += F_dust_energy
     
     # Correct to lab frame
     fHLL_lab = np.copy(fHLL)
     fHLL_lab[:,1] += fHLL[:,0]*vf
-    fHLL_lab[:,2] += 0.5*(fHLL[:,0])*vf**2 + (fHLL[:,1])*vf #+ FB*fHLL[:,3])*vf**2 +FB*fHLL[:,4])*vf
+    fHLL_lab[:,2] += 0.5*(fHLL[:,0] + FB*fHLL[:,3])*vf**2 + (fHLL[:,1]+FB*fHLL[:,4])*vf
     fHLL_lab[:,4] += fHLL[:,3]*vf
     
     return fHLL_lab
@@ -188,9 +172,9 @@ def HLLC_solve(WLin, WRin, vf, GAMMA, FB):
     # Left / Right states
     fHLL = np.zeros_like(fL)
     
-    indexL =                                 0 <= Sm.flatten()
-    indexLstar = (Sm.flatten()    <= 0 ) * ( 0 <= Sstar.flatten())
-    indexRstar = (Sstar.flatten() <= 0 ) * ( 0 <= Sp.flatten())
+    indexL =                                 0 < Sm.flatten()
+    indexLstar = (Sm.flatten()    <= 0 ) * ( 0 < Sstar.flatten())
+    indexRstar = (Sstar.flatten() <= 0 ) * ( 0 < Sp.flatten())
     indexR =         Sp.flatten() <= 0
     
     fHLL[indexL,:3] = fL[indexL,:3]
@@ -202,18 +186,18 @@ def HLLC_solve(WLin, WRin, vf, GAMMA, FB):
     #    Calculate signal speed for dust
     ld = (np.sqrt(WL[:,3])*WL[:,4] + np.sqrt(WR[:,3])*WR[:,4]) / (np.sqrt(WL[:,3]) + np.sqrt(WR[:,3]))
     
-    #   Calculate DUST flux in frame of face (note if vL < 0 < vR, then fHLL = 0.)
-    indexL = (ld > 1e-15) & np.logical_not(((WL[:,4] < 0) & (WR[:,4] > 0)))
-    indexC = (np.abs(ld) < 1e-15 ) & np.logical_not(((WL[:,4] < 0) & (WR[:,4] > 0)))
-    indexR = (ld < -1e-15) & np.logical_not(((WL[:,4] < 0) & (WR[:,4] > 0)))
-    fHLL[indexL,3:] = fL[indexL,3:]
-    fHLL[indexC,3:] = (fL[indexC,3:] + fR[indexC,3:])/2.
-    fHLL[indexR,3:] = fR[indexR,3:]
-    
+    #   Calculate DUST flux in frame of face
     w_f = ld.reshape(-1,1)
     f_dust = w_f*np.where(w_f > 0, UL[:,3:], UR[:,3:]) 
     
     fHLL[:, 3:] = f_dust
+    
+    #   ### Compute change in energy due to dust KE flux... ###
+    F_dust_energy_L = FB* (WL[:,3]*WL[:,4]**2)/2.
+    F_dust_energy_R = FB* (WR[:,3]*WR[:,4]**2)/2.
+    F_dust_energy = ld*np.where(ld >0, F_dust_energy_L, F_dust_energy_R)
+    
+    fHLL[:,2] += F_dust_energy
     
     # Correct to lab frame
     fHLL_lab = np.copy(fHLL)
@@ -248,10 +232,11 @@ def solve_euler(Npts, IC, tout, Ca = 0.5, fixed_v = 0.0, mesh_type = "fixed",
         HLL_solver = HLLC_solve
     else:
         HLL_solver = HLL_solve
+    
+    """Test schemes using an Explicit TVD RK integration"""
     # Setup up the grid
-    reconstruction = Arepo2
-    stencil = reconstruction.STENCIL
-    order = reconstruction.ORDER
+    stencil = 2
+    order = 2
     
     shape = Npts + 2*stencil
     dx0 = xend / Npts
@@ -259,7 +244,6 @@ def solve_euler(Npts, IC, tout, Ca = 0.5, fixed_v = 0.0, mesh_type = "fixed",
     dx = (xc[2:] - xc[:-2])*0.5
     
     # Reconstruction function:
-    R = reconstruction(xc, 0)
     
     
     def boundary(Q):
@@ -374,7 +358,7 @@ def solve_euler(Npts, IC, tout, Ca = 0.5, fixed_v = 0.0, mesh_type = "fixed",
         subs[4].set_ylabel('Dust velocity')
     
     while t < tout:
-        #print(t)
+        print(t)
         # 0) Calculate new timestep
         dtmax = Ca * min(dx) / max_wave_speed(U, GAMMA, FB)
         dt = min(dtmax, tout-t)
@@ -387,7 +371,7 @@ def solve_euler(Npts, IC, tout, Ca = 0.5, fixed_v = 0.0, mesh_type = "fixed",
         Wb = cons2prim(Ub, GAMMA, FB)
         
         #3+4 Compute Gradients (and reconstruct the edge states)
-        gradW = R.reconstruct(Wb, xc)
+        gradW = reconstruct(Wb, xc)
         
         xe = 0.5*(xc[1:] + xc[:-1])
         Wm = Wb[1:-1] + gradW*(xe[0:-1] - xc[1:-1]).reshape(-1,1)
@@ -405,7 +389,7 @@ def solve_euler(Npts, IC, tout, Ca = 0.5, fixed_v = 0.0, mesh_type = "fixed",
         
         #6. Compute first flux
         flux_0 =              HLL_solver(WL, WR, vf[1:-1], GAMMA, FB)
-        F0 = np.diff(flux_0, axis=0)
+        F0 = dt*np.diff(flux_0, axis=0)
         
         # 7. Move the mesh
         dxold = np.copy(dx)
@@ -418,28 +402,16 @@ def solve_euler(Npts, IC, tout, Ca = 0.5, fixed_v = 0.0, mesh_type = "fixed",
         dWdt = time_diff_W(Wb, gradW, vc[1:-1])
         
         #8b. predict cell centre, INCLUDING DRAG
-        Ws0 = boundary(W)[1:-1] + dt*dWdt
-        Ws = boundary(W)[1:-1] + dt*dWdt
-        
-        rho = Ws[:,0] + FB*Ws[:,3]
-    
-        v_com = (Ws[:,0]*Ws[:,1] + FB*Ws[:,3]*Ws[:,4])/rho
-        dV = (Wb[1:-1,4] - Wb[1:-1,1]) * np.exp(-K*rho*dt) 
-        da = (dWdt[:,4] - dWdt[:,1]) *-np.expm1(-dt*K*rho)/(K*rho)
-
-        Ws[:,1] = v_com - FB*Ws[:,3]*(dV + da)/rho
-        Ws[:,4] = v_com +    Ws[:,0]*(dV + da)/rho
-        
+        Ws = boundary(W)[1:-1]
+        rho_d = Ws[:, 3]
+        rho_g = Ws[:, 0]
+        Ws[:,1] += FB*K*rho_d*(Ws[:, 4] - Ws[:, 1])*dt
+        Ws[:,4] -=    K*rho_g*(Ws[:, 4] - Ws[:, 1])*dt       #dust
+        Ws += dWdt*dt
         
         #8c. Include constant gravity term, if applicable
         Ws[:,1] += gravity*dt #either 0.0 or 1.0
         Ws[:,4] += gravity*dt        
-        
-        # Heating due to drag
-        dEk = 0.5*(Ws[:,0]*Ws[:,1]**2 - Ws0[:,0]*Ws0[:,1]**2 +
-                   Ws[:,3]*Ws[:,4]**2 - Ws0[:,3]*Ws0[:,4]**2)
-        Ws[:,2] -= dEk * (GAMMA-1)
-        
         
         #8d. Reconstruct the edge states        
         xe = 0.5*(xc[1:] + xc[:-1])
@@ -449,39 +421,40 @@ def solve_euler(Npts, IC, tout, Ca = 0.5, fixed_v = 0.0, mesh_type = "fixed",
         
         #9. Compute second flux
         flux_1 =                  HLL_solver(Wp[:-1], Wm[1:], vf[1:-1], GAMMA, FB)
-        F1 = np.diff(flux_1, axis=0)
+        F1 = dt*np.diff(flux_1, axis=0)
         
         # 10. Time average fluxes (both used dt, so just *0.5)
-        f_g0 = -np.diff(flux_0[:,1]) ; f_g1 = -np.diff(flux_1[:,1])
-        f_d0 = -np.diff(flux_0[:,4]) ; f_d1 = -np.diff(flux_1[:,4])
-
-        Qn = Q - 0.5*dt*np.diff(flux_0 + flux_1, axis=0) 
-
-        m_com = Qn[:,1] + FB*Qn[:,4]
+        Qold = np.copy(Q)
         
-        rho = Qn[:,0] + FB*Qn[:,3]
-        eps_g = Qn[:,0] / rho ; eps_d = Qn[:,3] / rho
-        rho /= dx[1:-1]
-
-        df   = (eps_g*(f_d0+f_d1) - eps_d*(f_g0+f_g1)) / 2
-
-        dm = (eps_g*Q[:,4] - eps_d*Q[:,1]) * np.exp(-K*rho*dt) 
-        dm += df *-np.expm1(-dt*K*rho)/(K*rho)
+        flux = - 0.5*(F1+F0)
+        Q = Qold + flux
         
-        m_d = eps_d * m_com + dm
-        m_g = eps_g * m_com - dm*FB
-
-        #11. Update Conserved quantities
-        Q[:] = Qn
-
-        Q[:,1] = m_g
-        Q[:,4] = m_d
+        Utemp = Q/dx[1:-1].reshape(-1,1)
         
-        # Heating due to drag to conserve energy
-        if FB:
-            Q[:,2] -= 0.5*(Q[:,4]**2 - Qn[:,4]**2) / Q[:,3]
+        #10a. Recompute Q for gas / dust momenta...
+        p_g = Qold[:,1].copy()
+        p_d = Qold[:,4].copy()
+        f_g = flux[:,1].copy()
+        f_d = flux[:,4].copy()
+        rho_d = Utemp[:,0].copy()
+        rho_g = Utemp[:,3].copy()
+        rho = FB*rho_d + rho_g
+        eps_g = rho_g / rho 
+        eps_d = rho_d / rho 
         
-        #Update U
+        dp_0 = K*dt*(Qold[:,0]*Qold[:,4] - Qold[:,3]*Qold[:,1])/dxold[1:-1].reshape(-1)
+        dp_1 = K*dt*(Q[:,0]*Q[:,4] - Q[:,3]*Q[:,1])/dx[1:-1].reshape(-1)
+        
+        dp = 0.5*(dp_0 + dp_1)
+        
+        Q[:,4] -= dp
+        Q[:,1] += FB*dp
+        
+        # Include const gravity term
+        Q[:,4] += gravity*dt*Q[:,3]
+        Q[:,1] += gravity*dt*Q[:,0]
+        
+        #11. Update U
         U = Q/dx[1:-1].reshape(-1,1)
         
         if plot_every_step:
@@ -494,3 +467,91 @@ def solve_euler(Npts, IC, tout, Ca = 0.5, fixed_v = 0.0, mesh_type = "fixed",
     return xc, cons2prim(U, GAMMA, FB)
 
 
+
+
+
+###########################################################################################################
+###########################################################################################################
+###########################################################################################################
+
+
+
+def init_dusty_shock_Jtype(xc, K, dust_gas_ratio = 1.0, gravity=0.0, GAMMA=1.0001, FB=1.0, mach=1.1):
+    extent = xc[-1] - xc[0]
+    Nx = len(xc)
+    halfNx = int(Nx/2)
+    true = shock(mach, dust_gas_ratio, {'drag_type':'power_law', 'drag_const':1.0}, extent/2., halfNx, GAMMA, 1.0,
+                     t=0, FB=FB, Kin=K, offset=extent)
+    M = mach
+    
+    P = 1.0
+    rho = 1.0
+    rho_d = dust_gas_ratio*rho
+    
+    c_s = np.sqrt(GAMMA*P/rho)
+    v_s = c_s*M
+    
+    A = (1+FB*dust_gas_ratio)* (GAMMA+1) / (2*GAMMA)
+    B = - ( v_s*(1+FB*dust_gas_ratio) + P / (rho*v_s))
+    C = (GAMMA-1)/(2*GAMMA) *(v_s**2 * (1+FB*dust_gas_ratio) ) + P/rho
+    
+    v_post = (-B - np.sqrt(B**2 - 4*A*C)) / (2*A)
+    
+    
+    dv = v_s - v_post
+    
+    W = np.full([len(xc), NHYDRO], np.nan)
+    W[:, 0] = rho
+    W[:, 1] = dv
+    W[:, 2] = P
+    W[:, 3] = rho_d
+    W[:, 4] = dv
+    return(W)
+
+
+def _test_dusty_shocks_mach(t_final=5.0, Nx=200, Ca=0.2, FB = 1.0, K=1000., D = 1.0, GAMMA=7./5., extent=30):
+    machs=  [10]#, 20, 40]#, 5, 10, 20, 50]#, 5, 6, 7, 8, 10.]
+    times = [ t_final*10./m for m in machs ]
+    
+    for i in range(0, len(machs)):
+        mach = machs[i]
+        t_final = times[i]
+        
+        x, W = solve_euler(Nx, init_dusty_shock_Jtype, t_final, Ca=Ca,
+                           mesh_type = "Lagrangian", b_type = "inflowL_and_reflectR",
+                           dust_gas_ratio = D, GAMMA=GAMMA, xend=extent, 
+                           FB=FB, K=K, mach=mach)
+        
+        f, subs = plt.subplots(3, 1, sharex=True)
+        subs[0].plot(x, W[:,1], c="r", label="Gas")
+        subs[0].plot(x, W[:,4], c="k", label="Dust")
+        
+        
+        true = shock(mach, D, {'drag_type':'power_law', 'drag_const':1.0}, 10., 1000., GAMMA, 1.0,
+                     t=t_final, FB=FB, Kin=K, offset=extent - 0.04)
+        
+        subs[0].plot(true["xi"], true["wd"], c="gray", ls="--", label="True Dust")
+        subs[0].plot(true["xi"], true["wg"], c="pink", ls="--", label="True Gas" )
+        
+        subs[0].set_ylabel("v")
+        subs[0].legend(loc="best")
+        f.suptitle("J-type shock, t=" + str(t_final) + ", M=" + str(mach))
+       
+        subs[1].scatter(x, W[:,0], c="r", label="Gas")
+        subs[1].scatter(x, W[:,3], c="k", label="Dust")
+       
+        subs[1].plot(true["xi"], true["rhog"], c="pink", ls="--", label="True Gas")
+        subs[1].plot(true["xi"], true["rhod"], c="gray", ls="--", label="True Dust")
+        subs[1].set_ylabel("rho")
+        
+        subs[2].plot(true['xi'], true['P'], c="pink", ls="--", label="True Pressure")
+        subs[2].plot(x, W[:,2], c="red", label="Pressure")
+        subs[2].set_ylabel("P")
+        subs[2].set_xlabel("pos")
+        #plt.legend(loc="best")
+
+
+if __name__ == "__main__":
+    for t in [2.5]:
+        _test_dusty_shocks_mach(t_final=t, D=0.5, K=3., Nx=200, FB=1, GAMMA=7./5, extent=40)
+    plt.show()
