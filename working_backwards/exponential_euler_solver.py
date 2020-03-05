@@ -353,9 +353,10 @@ def solve_euler(Npts, IC, boundary, tout, Ca = 0.5, fixed_v = 0.0, mesh_type = "
         flux_1 =                  HLL_solver(Wp[:-1], Wm[1:], vf[1:-1], GAMMA, FB)
         
         #10. Compute the drag terms using 2nd order exponential Runge-Kutta method.
-        flux_av = - np.diff( flux_0 + flux_1, axis=0)*0.5
+        f_g0 = -np.diff(flux_0[:,1]) ; f_g1 = -np.diff(flux_1[:,1])
+        f_d0 = -np.diff(flux_0[:,4]) ; f_d1 = -np.diff(flux_1[:,4])
 
-        Qn = Q + dt*flux_av
+        Qn = Q - 0.5*dt*np.diff(flux_0 + flux_1, axis=0) 
 
         m_com = Qn[:,1] + FB*Qn[:,4]
         
@@ -363,10 +364,13 @@ def solve_euler(Npts, IC, boundary, tout, Ca = 0.5, fixed_v = 0.0, mesh_type = "
         eps_g = Qn[:,0] / rho ; eps_d = Qn[:,3] / rho
         rho /= dx[1:-1]
 
-        df   = eps_g*flux_av[:,4] - eps_d*flux_av[:,1]
+        df   = eps_g*f_d0 - eps_d*f_g0 
+        dfdt = (eps_g*(f_d1-f_d0) - eps_d*(f_g1-f_g0)) / dt
         dp =   eps_g*Q[:,4]       - eps_d*Q[:,1]
 
-        dm = dp * np.exp(-K*rho*dt) + df * (1 - np.exp(-K*rho*dt))/(K*rho)
+        dm = dp * np.exp(-K*rho*dt)
+        dm += (df - dfdt/(K*rho)) * (1 - np.exp(-K*rho*dt))/(K*rho)
+        dm += dfdt*dt/(K*rho)
         
         m_d = eps_d * m_com + dm
         m_g = eps_g * m_com - dm*FB
