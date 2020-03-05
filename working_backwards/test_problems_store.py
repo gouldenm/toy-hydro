@@ -351,7 +351,7 @@ def _test_const_gravity(t_final=1.0, Nx=256, gravity=-1.0, dust_gas_ratio=1.0, C
         
         #   Compute terminal velocity of dust
         H = (gravity*GAMMA)
-        x_true, v_true = dust_settling_sol(H, v_0=W[-1,4])
+        x_true, v_true = dust_settling_sol(H, v_0=W[-1,4], K=K)
         #subs[4].plot(xI, v_terminal, c = "k", ls="--", label="terminal velocity")
         subs[4].plot(x_true, v_true, c="k", ls="--", label="analytical solution")
     
@@ -458,9 +458,9 @@ def _test_dusty_shocks_mach(t_final=5.0, Nx=200, Ca=0.2, FB = 1.0, K=1000., D = 
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
     
-    #for K in [0.1, 1.0, 10.0, 100.0]:
-    #    _test_convergence(init_wave, figs_evol=plt.subplots(3, 1)[1], fig_err=plt.subplots(1)[1],
-    #                      t_final = 1.0, FB=1, GAMMA=1.5, K=K)
+    for K in [0.1, 1.0, 10.0, 100.0]:
+        _test_convergence(init_wave, figs_evol=plt.subplots(3, 1)[1], fig_err=plt.subplots(1)[1],
+                          t_final = 1.0, FB=1, GAMMA=1.5, K=K)
     
     #_test_sod(t_final=0.2, Nx=569)
     
@@ -470,8 +470,8 @@ if __name__ == "__main__":
     
     #_test_const_gravity()
     
-    for t in [2.5]:
-        _test_dusty_shocks_mach(t_final=t, D=0.5, K=3., Nx=500, FB=1, GAMMA=7./5, extent=40)
+    #for t in [2.5]:
+    #    _test_dusty_shocks_mach(t_final=t, D=0.5, K=3., Nx=500, FB=1, GAMMA=7./5, extent=40)
     plt.show()
 
 

@@ -264,6 +264,21 @@ def solve_euler(Npts, IC, boundary, tout, Ca = 0.5, fixed_v = 0.0, mesh_type = "
         xc = xc + vc*dt
         dx = (xc[2:] - xc[:-2])*0.5
         return(xc, dx)
+        
+    def apply_drag_forces_split(U, dt):
+        """Operator split drag forces"""
+        rho_g, rho_d = U[:,0], U[:,3]
+        
+        rho = rho_g + FB*rho_d
+        exp = np.expm1( -K*rho*dt)
+        print(exp)
+        pg, pd = U[:,1], U[:,4]
+        
+        v_com = (pg + FB*pd) / rho 
+        dp = (rho_g*pd - rho_d*pg) * exp / rho 
+        
+        U[:, 4] += dp
+        U[:, 1] -= FB*dp
     
     
     #########################################################################################
@@ -290,8 +305,10 @@ def solve_euler(Npts, IC, boundary, tout, Ca = 0.5, fixed_v = 0.0, mesh_type = "
         dtmax = Ca * min(dx) / max_wave_speed(U, GAMMA, FB)
         dt = min(dtmax, tout-t)
         
+        # 0.5) Initial drag step
+        apply_drag_forces_split(U, dt/2.)
+        
         #1. Apply Boundaries
-        U = Q/dx[1:-1].reshape(-1,1)
         Ub = boundary(U,shape)
         
         #2. Compute Primitive variables
@@ -332,15 +349,6 @@ def solve_euler(Npts, IC, boundary, tout, Ca = 0.5, fixed_v = 0.0, mesh_type = "
         #8b. predict cell centre, INCLUDING DRAG
         Ws = boundary(W, shape)[1:-1] + dt*dWdt
         
-        rho = Ws[:,0] + FB*Ws[:,3]
-    
-        v_com = (Ws[:,0]*Ws[:,1] + FB*Ws[:,3]*Ws[:,4])/rho
-        dV = (Wb[:,4] - Wb[:,1]) * np.exp(-K*rho*dt) 
-        da = (dWdt[:,4] - dWdt[:,1]) *-np.expm1(-dt*K*rho)/(K*rho)
-
-        Ws[:,1] = v_com - FB*Ws[:,3]*(dV + da)/rho
-        Ws[:,4] = v_com +    Ws[:,0]*(dV + da)/rho
-        
         #8c. Include constant gravity term, if applicable
         Ws[:,1] += gravity*dt #either 0.0 or 1.0
         Ws[:,4] += gravity*dt        
@@ -356,52 +364,24 @@ def solve_euler(Npts, IC, boundary, tout, Ca = 0.5, fixed_v = 0.0, mesh_type = "
         F1 = dt*np.diff(flux_1, axis=0)
         
         # 10. Time average fluxes (both used dt, so just *0.5)
-        
         flux_av = - 0.5*(F1+F0)
         Qn = Q + flux_av*dt
-        Utemp = Qn/dx[1:-1].reshape(-1,1)
-        
-        #10. Compute the drag terms using 2nd order exponential Runge-Kutta method.
-        f_g0 = -np.diff(flux_0[:,1]) ; f_g1 = -np.diff(flux_1[:,1])
-        f_d0 = -np.diff(flux_0[:,4]) ; f_d1 = -np.diff(flux_1[:,4])
-
-        Qn = Q - 0.5*dt*np.diff(flux_0 + flux_1, axis=0) 
-
-        m_com = Qn[:,1] + FB*Qn[:,4]
-        
-        rho = Qn[:,0] + FB*Qn[:,3]
-        eps_g = Qn[:,0] / rho ; eps_d = Qn[:,3] / rho
-        rho /= dx[1:-1]
-
-        df   = eps_g*f_d0 - eps_d*f_g0 
-        dfdt = (eps_g*(f_d1-f_d0) - eps_d*(f_g1-f_g0)) / dt
-
-        dm = (eps_g*Q[:,4] - eps_d*Q[:,1]) * np.exp(-K*rho*dt) 
-        dm += (df - dfdt/(K*rho)) *-np.expm1(-dt*K*rho)/(K*rho)
-        dm += dfdt*dt/(K*rho)
-        
-        m_d = eps_d * m_com + dm
-        m_g = eps_g * m_com - dm*FB
-
-        #11. Update Conserved quantities
-        Q[:] = Qn
-
-        Q[:,1] = m_g
-        Q[:,4] = m_d
         
         # Include const gravity term
         Q[:,4] += gravity*dt*Q[:,3]
         Q[:,1] += gravity*dt*Q[:,0]
         
+        #11. Update U
+        U = Q/dx[1:-1].reshape(-1,1)
+        
+        #   Final drag step:
+        apply_drag_forces_split(U, dt/2)
+        
         if plot_every_step:
-            #Update U
-            U = Q/dx[1:-1].reshape(-1,1)
             W = cons2prim(U, GAMMA, FB)
             for i in range(0,5):
                 subs[i].plot(xc[2:-2], W[:,i], label=str(t))
             plt.pause(0.5)
         t = min(tout, t+dt)
-    
-    U = Q/dx[1:-1].reshape(-1,1)
     xc = xc[stencil:-stencil]
     return xc, cons2prim(U, GAMMA, FB)
