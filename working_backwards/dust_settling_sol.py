@@ -25,7 +25,7 @@ def dust_settling_sol(H, v_0 = None, rho_0 = 1.0, K=10.0, g=-1.0):
     if v_0 is None:
         v_0 = g/(K*rho_0*np.exp(H*1.0))
 
-    xc = np.linspace(1.0,0, 100000)
+    xc = np.linspace(1, 0, 10000)
     sol = odeint(dv_dx, [xc[0], xc[-1]], [v_0], t_eval=xc[1:-1], method='BDF')
 
     return (sol.t, sol.y[0])

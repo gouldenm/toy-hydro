@@ -3,7 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 NHYDRO = 5
-HLLC = True
+HLLC = False
 plot_every_step = None#True
 
 def reconstruct(Q, xc):
@@ -618,6 +618,7 @@ def solve_euler_split(Npts, IC, boundary, tout, Ca = 0.5, fixed_v = 0.0, mesh_ty
         rho = rho_g + FB*rho_d
         eps_g, eps_d = rho_g /rho, rho_d /rho
         
+        #factor = 1./(1+(K*rho*dt)) - 1.0 
         factor = np.exp( -K * rho * dt ) - 1.0
         
         pg, pd = Q[:,1], Q[:,4]
