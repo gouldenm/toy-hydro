@@ -1,3 +1,4 @@
+
 from __future__ import print_function
 import numpy as np
 from dustywave_sol2 import *
@@ -7,7 +8,7 @@ from dusty_shock_adiabatic import *
 from exponential_euler_solver import *
 NHYDRO=5
 
-solve_euler = solve_euler_split 
+#solve_euler = solve_euler_split 
 #solve_euler = solve_euler_mid
 
 def boundary_periodic(Q, shape):
@@ -73,68 +74,64 @@ def boundary_inflowL_and_reflectR(Q, shape):
 
 ## ### ### TEST PROBLEMS ### ###
 
-def _test_convergence(IC, pmin=4, pmax=9, figs_evol=None, fig_err=None, t_final=10.0, FB=1, 
-                      GAMMA=5./3., Ks=[0.1]):
+def _test_convergence(IC, pmin=4, pmax=8, figs_evol=None, fig_err=None, t_final=10.0, FB=1, 
+                      GAMMA=5./3., K=0.1):
     N = 2**np.arange(pmin, pmax+1)
-    Ni = 32
     c=None
     schemes = [solve_euler_split, solve_euler, solve_euler_mid]
-    labels = [" split ", " f(t) ", " average f "]
+    labels = [" split ", " complete ", " mid-point "]
     colours=[ "g", "b", "r"]
     for i in range(0,3):
         errs_gas = []
         errs_dust = []
-        figs_evol=plt.subplots(3, 1)[1]
-        for K in Ks:
-            print (K)
+        for Ni in N:
+            print (Ni)
             _, W0 = schemes[i](Ni, IC, boundary_periodic, 0, Ca = 0.4, mesh_type = "fixed", 
                                 FB=FB, K=K, GAMMA=GAMMA)
             x, W = schemes[i](Ni, IC, boundary_periodic, t_final, Ca = 0.4, mesh_type = "fixed", 
                                FB=FB, K=K, GAMMA=GAMMA)
             true = IC(x, K, t=t_final)
-                
-            if figs_evol is not None:
-                #c = figs_evol[0].plot(x, W[:,0],# c=c, 
-                #                    label="gas" + labels[i])[0].get_color()
-                figs_evol[0].plot(x, W[:,3], 
-                                    label="dust "+ str(K)+ labels[i])
-                #figs_evol[1].plot(x, W[:,1])# c=c)
-                figs_evol[1].plot(x, W[:,4], 
-                                    label="dust "+ str(K) + labels[i])
-                figs_evol[2].plot(x, W[:,2])# c=c)
-                
-                figs_evol[0].set_ylabel('Density')
-                figs_evol[1].set_ylabel('Velocity')
-                figs_evol[2].set_ylabel('Pressure')
-                figs_evol[2].set_xlabel('x')
-        
             
             if figs_evol is not None:
                 figs_evol[0].legend(loc='best',frameon=False)
-                figs_evol[1].legend(loc='best',frameon=False)
-
-                figs_evol[0].plot(x, true[:,0], c="black", linestyle="-", 
-                                    label="gas")[0].get_color()
+                #figs_evol[0].plot(x, true[:,0], c="black", linestyle="-", 
+                #                    label="gas")[0].get_color()
                 figs_evol[0].plot(x, true[:,3], c="black", 
                                   label="dust", linestyle = "--")
                 figs_evol[1].plot(x, true[:,1], c="black", linestyle="-", 
                                   label="gas")[0].get_color()
                 figs_evol[1].plot(x, true[:,4], c="black", 
                                   label="dust", linestyle = "--")
+            
+            if figs_evol is not None:
+                #figs_evol[0].plot(x, W[:,0], 
+                #                    label="gas" + labels[i])[0].get_color()
+                figs_evol[0].plot(x, W[:,3], 
+                                    label="dust "+ str(Ni)+ labels[i])
+                figs_evol[1].plot(x, W[:,1])
+                figs_evol[1].plot(x, W[:,4], 
+                                    label="dust "+ str(Ni)+ labels[i])
+                figs_evol[2].plot(x, W[:,2])
+                
+                figs_evol[0].set_ylabel('Density')
+                figs_evol[1].set_ylabel('Velocity')
+                figs_evol[2].set_ylabel('Pressure')
+                figs_evol[2].set_xlabel('x')
+                label=None
+        
             err = W - true
             errs_gas.append(np.sqrt(np.mean((err[:,1])**2)))
             errs_dust.append(np.sqrt(np.mean((err[:,4])**2)))
         if fig_err is not None:
-            fig_err.loglog(Ks, errs_gas, c=colours[i], label=" gas"+ labels[i], ls = "-")
-            fig_err.loglog(Ks, errs_dust, c=colours[i], label=" dust"+ labels[i], ls="--")
+            fig_err.loglog(N, errs_gas, c=colours[i], label=" gas"+ labels[i], ls = "-")
+            fig_err.loglog(N, errs_dust, c=colours[i], label=" dust"+ labels[i], ls="--")
             plt.title("K=" + str(K))
     
-        if False: #fig_err is not None:
+        if fig_err is not None:
             fig_err.set_xlabel('N')
             fig_err.set_ylabel('L2 velocity error')
-            fig_err.plot(N, 1e-4/N**2, label='1/N^2', c='k')
-            fig_err.legend()
-        
+        fig_err.plot(N, 1e-2/N**2, label='1/N^2', c='k')
+        fig_err.legend()
 
 
 def init_wave(xc, K, cs0=1.0, rho0=1.0, v0=1.0, drho=1e-4, t=0, dust_gas_ratio = 1.0, 
@@ -193,18 +190,18 @@ def init_sod(xc, K, dust_gas_ratio = 1.0, gravity=0.0, GAMMA=5./3., FB=1.0, mach
     return(W)
 
 
-def _test_sod(Nx=256, t_final=0.1, gravity=0.0, FB=1.0):
+def _test_sod(Nx=256, t_final=0.1, gravity=0.0, FB=1.0, K=1000):
     IC = init_sod
     
-    f, subs = plt.subplots(5, 1)
+    f, subs = plt.subplots(4, 1)
     plt.suptitle("Dustyshock test")
     
     xL, WL = solve_euler(Nx, IC, boundary_flow, t_final, Ca=0.4, 
-                         mesh_type = "Lagrangian", fixed_v = 0.0, FB=FB)
+                         mesh_type = "Lagrangian", fixed_v = 0.0, FB=FB, K=K)
     xF, WF = solve_euler(Nx, IC, boundary_flow, t_final, Ca=0.4, 
-                         mesh_type= "Fixed", fixed_v=0.0, FB=FB)
+                         mesh_type= "Fixed", fixed_v=0.0, FB=FB, K=K)
     xI, WI = solve_euler(Nx, IC, boundary_flow, 0.0, Ca=0.4, 
-                         mesh_type = "Fixed", fixed_v=0.0, FB=FB)
+                         mesh_type = "Fixed", fixed_v=0.0, FB=FB, K=K)
     
     for i in range(0,5):
         subs[i].plot(xL, WL[:,i], c="b", label="Lagrangian")
@@ -248,7 +245,7 @@ def _test_dustybox_time(Nx=256, t_final= 1.0, FB=1.0):
     IC = init_dustybox
     
     plt.figure()
-    for ratio in [0.01, 0.1, 1., 10., 100.]:
+    for K in [0.01, 0.1, 1., 10., 100.]:
         plt.title("Dustybox velocity over time")
         ts = []
         vLs = []
@@ -257,7 +254,7 @@ def _test_dustybox_time(Nx=256, t_final= 1.0, FB=1.0):
             ts.append(t)
             xL, WL = solve_euler(Nx, IC, boundary_periodic, t, Ca=0.4,
                                  mesh_type = "Lagrangian",
-                                 dust_gas_ratio = ratio, FB=FB)
+                                 dust_gas_ratio = 1, FB=FB, K=K)
             """xF, WF = solve_euler(Nx, IC, t, Ca=0.4,
                                  mesh_type = "fixed", b_type = "periodic",
                                  dust_gas_ratio = ratio)"""
@@ -265,7 +262,7 @@ def _test_dustybox_time(Nx=256, t_final= 1.0, FB=1.0):
             #vF = np.mean(WF[:,4])
             vLs.append(vL)
             #vFs.append(vF)
-        plt.plot(ts, vLs, label="Lagrangian ratio=" + str(ratio))
+        plt.plot(ts, vLs, label="K=" + str(K))
         #plt.plot(ts, vFs, ls="--")
         plt.xlabel("t")
         plt.ylabel("Dust velocity")
@@ -298,7 +295,7 @@ def _test_dustybox_convergence(pmin = 4, pmax=10, t_final=1.0, FB=1, K=0.01):
     N = 2**np.arange(pmin, pmax+1)
     
     plt.figure()
-    for ratio in [0.01, 0.1, 1., 10.]:
+    for K in [0.01, 0.1, 1., 10., 100]:
         true = analytical_dustybox_feedback(t_final, K, ratio)
         plt.title("Dustybox velocity error convergence")
         vLs = []
@@ -306,7 +303,7 @@ def _test_dustybox_convergence(pmin = 4, pmax=10, t_final=1.0, FB=1, K=0.01):
         for Ni in N:
             xL, WL = solve_euler(Ni, IC, boundary_periodic, t_final, Ca=0.4,
                                  mesh_type = "fixed",
-                                 dust_gas_ratio = ratio, FB=1, K=K)
+                                 dust_gas_ratio = 1, FB=1, K=K)
             vL = true - np.mean(WL[:,4])
             if vL == 0:
                 vL = 1e-20
@@ -471,9 +468,10 @@ if __name__ == "__main__":
     import matplotlib.pyplot as plt
     
     #K = [0.1, 1.0, 10.0, 100, 1e3, 1e4, 1e5]
-    #K = [10, 100, 1000]
-    #_test_convergence(init_wave, figs_evol=plt.subplots(3, 1)[1], fig_err=plt.subplots(1)[1],
-    #                      t_final = 10.0, FB=1, GAMMA=1.000001, Ks=K)
+    #Ks = [0.1, 1000.0, 1e4]#, 100, 1000]
+    #for K in Ks:
+    #    _test_convergence(init_wave, figs_evol=plt.subplots(3, 1)[1], fig_err=plt.subplots(1)[1],
+    #                      t_final = 10.0, FB=1, GAMMA=1.000001, K=K)
     
     #_test_sod(t_final=0.2, Nx=569)
     
@@ -481,11 +479,11 @@ if __name__ == "__main__":
     
     #_test_dustybox_convergence(t_final=0.5)
     
-    for K in [1e4]:
-        _test_const_gravity(K=K)
+    #for K in [1e4]:
+    #    _test_const_gravity(K=K)
     
-    #for t in [2.5]:
-    #    _test_dusty_shocks_mach(t_final=t, D=0.5, K=3., Nx=500, FB=1, GAMMA=7./5, extent=40)
+    for t in [2.5]:
+        _test_dusty_shocks_mach(t_final=t, D=0.5, K=3., Nx=80, FB=1, GAMMA=7./5, extent=40)
     plt.show()
 
 
