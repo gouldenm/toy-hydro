@@ -102,12 +102,36 @@ def HLL_solve(WLin, WRin, vf, GAMMA, FB):
     
     # ### ### ### DUST ### ### ###
     #   Calculate DUST flux in frame of face (note if vL < 0 < vR, then fHLL = 0.)
+    R = np.sqrt(WL[:,3]/WR[:,3])
+    f = R / (1+R)
+    Sd = f * WL[:,4] + (1-f) * WR[:,4]
+    vacuum = np.logical_and( (WL[:,4] < 0), (WR[:,4] >0) )
+    indexL = Sd > 0
+    indexR = Sd < 0
+    indexC = Sd == 0
+    
+    f_dust = np.zeros_like(fL[:,3:])
+    
+    f_dust[indexL,:] = ( WL[:,4].reshape(-1,1) * fL[:,3:]) [indexL]
+    f_dust[indexR,:] = ( WR[:,4].reshape(-1,1) * fR[:,3:] ) [indexR]
+    f_dust[indexC,:] = 0.5 * (WL[:,4].reshape(-1,1) * fL[:,3:] + WR[:,4].reshape(-1,1) * fR[:,3:]) [indexC]
+    f_dust[vacuum,:] = 0
+    
+
     f_dust = (WL[:,4] > 0).reshape(-1,1) * fL[:,3:] + (WR[:,4] < 0).reshape(-1,1) * fR[:,3:] 
     fHLL[:, 3:] = f_dust
     
     #   ### Compute change in energy due to dust KE flux... ###
     F_dust_energy_L = FB* (WL[:,3]*WL[:,4]**3)/2.
     F_dust_energy_R = FB* (WR[:,3]*WR[:,4]**3)/2.
+
+    F_dust_energy = np.zeros_like(fL[:,2])
+
+    F_dust_energy[indexL] = F_dust_energy_L[indexL]
+    F_dust_energy[indexR] = F_dust_energy_R[indexR]
+    F_dust_energy[indexC] = 0.5 * (F_dust_energy_L + F_dust_energy_R)[indexC]
+    F_dust_energy[vacuum] = 0
+
     F_dust_energy = (WL[:,4] > 0) * F_dust_energy_L + (WR[:,4] < 0) * F_dust_energy_R
     
     fHLL[:,2] += F_dust_energy
@@ -182,14 +206,36 @@ def HLLC_solve(WLin, WRin, vf, GAMMA, FB):
     fHLL[indexR,:3] = fR[indexR,:3]
     
     # ### ### ### DUST ### ### ###
-    #    Calculate signal speed for dust
-    #   Calculate DUST flux in frame of face (note if vL < 0 < vR, then fHLL = 0.)
+    R = np.sqrt(WL[:,3]/WR[:,3])
+    f = R / (1+R)
+    Sd = f * WL[:,4] + (1-f) * WR[:,4]
+    vacuum = np.logical_and( (WL[:,4] < 0), (WR[:,4] >0) )
+    indexL = Sd > 0
+    indexR = Sd < 0
+    indexC = Sd == 0
+    
+    f_dust = np.zeros_like(fL[:,3:])
+    
+    f_dust[indexL,:] = ( fL[:,3:]) [indexL]
+    f_dust[indexR,:] = ( fR[:,3:] ) [indexR]
+    f_dust[indexC,:] = 0.5 * (fL[:,3:] + fR[:,3:]) [indexC]
+    f_dust[vacuum,:] = 0
+    
+
     f_dust = (WL[:,4] > 0).reshape(-1,1) * fL[:,3:] + (WR[:,4] < 0).reshape(-1,1) * fR[:,3:] 
     fHLL[:, 3:] = f_dust
     
     #   ### Compute change in energy due to dust KE flux... ###
     F_dust_energy_L = FB* (WL[:,3]*WL[:,4]**3)/2.
     F_dust_energy_R = FB* (WR[:,3]*WR[:,4]**3)/2.
+
+    F_dust_energy = np.zeros_like(fL[:,2])
+
+    F_dust_energy[indexL] = F_dust_energy_L[indexL]
+    F_dust_energy[indexR] = F_dust_energy_R[indexR]
+    F_dust_energy[indexC] = 0.5 * (F_dust_energy_L + F_dust_energy_R)[indexC]
+    F_dust_energy[vacuum] = 0
+
     F_dust_energy = (WL[:,4] > 0) * F_dust_energy_L + (WR[:,4] < 0) * F_dust_energy_R
     
     fHLL[:,2] += F_dust_energy
